@@ -15,16 +15,18 @@ class DataReader:
         self.df = pd.read_fwf(self.file_path, colspecs=self.COLSPECS, header=None)
 
         # Asignar nombres a las columnas
-        self.df.columns = ['Col1', 'Col2', 'Col3', 'Col4', 'Col5', 'Hora', 'Fecha']
+        self.df.columns = [
+            'Sensor1', 'Sensor2', 'Sensor3', 'Sensor4', 'Col5', 'Hora', 'Fecha'
+        ]
 
         # Convertir las columnas numéricas a float (las primeras 5)
-        self.df[['Col1', 'Col2', 'Col3', 'Col4', 'Col5']] = (
-            self.df[['Col1', 'Col2', 'Col3', 'Col4', 'Col5']]
+        self.df[['Sensor1', 'Sensor2', 'Sensor3', 'Sensor4', 'Col5']] = (
+            self.df[['Sensor1', 'Sensor2', 'Sensor3', 'Sensor4', 'Col5']]
             .replace({',': '.'}, regex=True)
             .apply(pd.to_numeric)
         )
-        self.df[['Col1', 'Col2', 'Col3', 'Col4', 'Col5']] = self.df[
-            ['Col1', 'Col2', 'Col3', 'Col4', 'Col5']
+        self.df[['Sensor1', 'Sensor2', 'Sensor3', 'Sensor4', 'Col5']] = self.df[
+            ['Sensor1', 'Sensor2', 'Sensor3', 'Sensor4', 'Col5']
         ].apply(pd.to_numeric, errors='coerce')
 
         # Convertir la columna de hora en formato HH:MM:SS a tipo datetime
@@ -41,7 +43,7 @@ class DataReader:
         # Retorna el DataFrame leído
         return self.df
 
-    def plot_data(self, column='Col2'):
+    def plot_data(self, column='Sensor2'):
         plt.figure(figsize=(10, 6))
         plt.scatter(
             self.df['FechaHora'], self.df[column],
@@ -61,10 +63,10 @@ class DataReader:
 if __name__ == '__main__':
     # Instanciar la clase
     reader = DataReader(
-        'Temperatura_salas_41_46_30_Nov24.dat'
+        r'Data/Keithley/Temperatura_salas_41_46_30_Nov24.dat'
     )
 
     # Leer los datos
     reader.read_data()
 
-    reader.plot_data('Col3')
+    reader.plot_data('Sensor2')
