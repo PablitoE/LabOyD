@@ -21,6 +21,7 @@ FRACTION_OF_SEPARATION_TO_SEARCH_FRINGES = 0.8
 MINIMUM_DISTANCE_FROM_EDGES = 15
 FIND_FRINGES_STEP = 25       # px
 FIND_FRINGES_APERTURE = 8   # px
+REQUIRED_IMS = 10
 RESULTS_DIR = "results"
 
 SHOW_ALL = False
@@ -174,6 +175,12 @@ def analyze_dir_or_image(image_path):
                 interfranjas.append(i)
         flechas = nominal_values(flechas)
         interfranjas = nominal_values(interfranjas)
+
+        if len(flechas) < REQUIRED_IMS:
+            print(
+                "No se encontraron suficientes imagenes para el análisis de acuerdo al"
+                f" procedimiento ({REQUIRED_IMS} imágenes)."
+            )
 
         save_path = None
         if SAVE_RESULTS:
