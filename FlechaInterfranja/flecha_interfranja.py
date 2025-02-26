@@ -4,10 +4,14 @@ import matplotlib.pyplot as plt
 from scipy.signal import find_peaks
 from scipy.optimize import minimize, curve_fit
 from scipy.stats import linregress
+from scipy import fftpack
+from scipy.ndimage import rotate
 from uncertainties import ufloat
 from uncertainties.unumpy import nominal_values
 import os
 import re
+
+WAVELENGTH_NM = 633
 
 MINIMUM_DISTANCE_PEAKS = 10
 PROMINENCE_PEAKS = 1
@@ -23,10 +27,41 @@ FIND_FRINGES_STEP = 25       # px
 FIND_FRINGES_APERTURE = 8   # px
 REQUIRED_IMS = 10
 RESULTS_DIR = "results"
+IQR_FACTOR_IMS = 0.5
 
 SHOW_ALL = False
 SHOW_EACH_RESULT = False
 SAVE_RESULTS = True
+
+
+def scaledLinearOp_To_array(scaledLinearOp):
+    identity = np.eye(scaledLinearOp.shape[0])
+    return scaledLinearOp.matmat(identity)
+
+
+def rotate_image_to_max_frequency(img_array, ignore_low_freq_pixels=2):
+    Nr, Nc = img_array.shape
+    # Calcular la transformada de Fourier 2D
+    fft_img = fftpack.fft2(img_array)
+
+    # Ignorar la componente continua y una cierta cantidad de pixeles aledaños
+    fft_img[0, 0] = 0  # componente continua
+    fft_img[:ignore_low_freq_pixels, :ignore_low_freq_pixels] = 0  # pixeles aledaños
+    fft_img[:ignore_low_freq_pixels, Nc - ignore_low_freq_pixels:] = 0
+
+    # Encontrar el máximo de frecuencia espacial en el tercer o cuarto cuadrante
+    fft_img = fft_img[:Nr//2, :]
+    max_freq_idx = np.unravel_index(np.argmax(np.abs(fft_img)), fft_img.shape)
+    if max_freq_idx[1] > Nc//2:
+        max_freq_idx = (max_freq_idx[0], max_freq_idx[1] - Nc)
+
+    # Calcular el ángulo de rotación
+    angle = np.arctan2(max_freq_idx[0], max_freq_idx[1])
+
+    # Rotar la imagen
+    rotated_img = rotate(img_array, angle * 180 / np.pi, mode='nearest', reshape=False)
+
+    return rotated_img
 
 
 def blurrear_imagen(img, kernel_size=GAUSSIAN_BLUR_KERNEL_SIZE,
@@ -101,7 +136,8 @@ def optimize_lines(fringes):
         return total_se
 
     initial_guess = np.zeros(3)
-    result = minimize(mse, initial_guess, args=fringes, method='BFGS')
+    bounds = [(None, None), (0, 10000), (0, 10000)]
+    result = minimize(mse, initial_guess, args=fringes, method='L-BFGS-B', bounds=bounds)
 
     slope = result.x[0]
     interfringe = result.x[1]
@@ -111,6 +147,8 @@ def optimize_lines(fringes):
 
     total_points = np.sum([len(fringe) for fringe in fringes])
     rms = result.hess_inv * result.fun / (total_points - len(result.x))
+    if not isinstance(rms, np.ndarray):
+        rms = scaledLinearOp_To_array(rms)
     interfringe = ufloat(interfringe, np.sqrt(rms[1, 1]))
     return slope, intercepts, interfringe
 
@@ -162,32 +200,54 @@ def eliminar_outliers_iqr(data, return_mask=False, iqr_factor=1.5, only_upper=Fa
 
 def analyze_dir_or_image(image_path):
     if os.path.isdir(image_path):
-        flechas = []
-        interfranjas = []
-        for image_file in os.listdir(image_path):
-            image_file_path = os.path.join(image_path, image_file)
-            if re.match(r'^\d+', image_file) is not None and cv2.haveImageReader(
-                image_file_path
-            ):
-                print(f"Analizando {image_file}")
-                i, f = analyze_interference(image_file_path)
-                flechas.append(f)
-                interfranjas.append(i)
-        flechas = nominal_values(flechas)
-        interfranjas = nominal_values(interfranjas)
-
-        if len(flechas) < REQUIRED_IMS:
-            print(
-                "No se encontraron suficientes imagenes para el análisis de acuerdo al"
-                f" procedimiento ({REQUIRED_IMS} imágenes)."
-            )
-
-        save_path = None
+        output_dir = os.path.join(image_path, RESULTS_DIR)
         if SAVE_RESULTS:
-            output_dir = os.path.join(image_path, RESULTS_DIR)
             os.makedirs(output_dir, exist_ok=True)
-            save_path = os.path.join(output_dir, "flechas_vs_interfranjas.svg")
-        plot_flechas_interfranjas(flechas, interfranjas, save_path=save_path)
+        save_mid_results_path = os.path.join(output_dir, "flechas_vs_interfranjas.npz")
+        if os.path.isfile(save_mid_results_path) and input(
+            "Los resultados ya fueron guardados. ¿Deseas utilizarlos? [Y/n]"
+        ) != "n":
+            archivo = np.load(save_mid_results_path)
+            flechas = archivo["flechas"]
+            interfranjas = archivo["interfranjas"]
+            image_files = archivo["image_files"]
+        else:
+            flechas = []
+            interfranjas = []
+            image_files = []
+            for image_file in os.listdir(image_path):
+                image_file_path = os.path.join(image_path, image_file)
+                if re.match(r'^\d+', image_file) is not None and cv2.haveImageReader(
+                    image_file_path
+                ):
+                    print(f"Analizando {image_file}")
+
+                    i, f = analyze_interference(image_file_path)
+
+                    flechas.append(f)
+                    interfranjas.append(i)
+                    image_files.append(image_file)
+            flechas = nominal_values(flechas)
+            interfranjas = nominal_values(interfranjas)
+            image_files = np.array(image_files)
+
+            if len(flechas) < REQUIRED_IMS:
+                print(
+                    "No se encontraron suficientes imagenes para el análisis de acuerdo "
+                    f"al procedimiento ({REQUIRED_IMS} imágenes)."
+                )
+
+            if SAVE_RESULTS:
+                np.savez_compressed(save_mid_results_path, flechas=flechas,
+                                    interfranjas=interfranjas, image_files=image_files)
+
+        save_path = (
+            os.path.join(output_dir, "flechas_vs_interfranjas.svg")
+            if SAVE_RESULTS else None
+        )
+        plot_flechas_interfranjas(
+            flechas, interfranjas, save_path=save_path, iqr_factor=IQR_FACTOR_IMS
+        )
 
     else:
         analyze_interference(image_path)
@@ -199,13 +259,20 @@ def analyze_interference(image_path):
     if img is None:
         raise ValueError("No se pudo cargar la imagen. Verifica la ruta del archivo.")
 
-    # Mostrar la imagen original
+    # Rotar la imagen para dejar las franjas más o menos verticales
+    img_rotada = rotate_image_to_max_frequency(img)
+
+    # Mostrar la imagen original y la rotada
     if SHOW_ALL:
-        plt.figure(figsize=(8, 6))
-        plt.title("Imagen Original")
-        plt.imshow(img, cmap='gray')
-        plt.colorbar()
+        fig, axs = plt.subplots(1, 2, figsize=(16, 6))
+        axs[0].title.set_text("Imagen Original")
+        axs[0].imshow(img, cmap='gray')
+        axs[1].title.set_text("Imagen Rotada")
+        im = axs[1].imshow(img_rotada, cmap='gray')
+        fig.colorbar(im, ax=axs[1])
         plt.show()
+
+    img = img_rotada
 
     # Detectar franjas de interferometría
     # Sumar la intensidad a lo largo de las filas para proyectar las franjas
@@ -375,15 +442,38 @@ def analyze_interference(image_path):
     return interfringe_distance, flecha
 
 
-def plot_flechas_interfranjas(flechas, interfranjas, error_flechas=2.0, save_path=None):
+def plot_flechas_interfranjas(
+    flechas, interfranjas, error_flechas=2.0, save_path=None, iqr_factor=0.75
+):
     pendiente, intercepto, r_value, p_value, std_err = linregress(interfranjas, flechas)
+
+    y = pendiente * interfranjas + intercepto
+    errores = np.abs(flechas - y)
+    mask_buenos = eliminar_outliers_iqr(
+        errores, return_mask=True, only_upper=True, iqr_factor=iqr_factor
+    )
+
+    descartados = np.where(~mask_buenos)[0]
+    no_descartados = np.where(mask_buenos)[0]
+
+    if np.any(~mask_buenos):
+        pendiente, intercepto, r_value, p_value, std_err = linregress(
+            interfranjas[no_descartados], flechas[no_descartados]
+        )
     x = np.linspace(interfranjas.min(), interfranjas.max(), 4)
     y = pendiente * x + intercepto
     pendiente_u = ufloat(pendiente, std_err)
+
     plt.figure(figsize=(8, 6))
     plt.title(f"Flechas vs Interfranjas. Pendiente: {pendiente_u} (k=1)")
-    plt.errorbar(interfranjas, flechas, yerr=error_flechas, fmt='s', color='black',
-                 capsize=4, elinewidth=1.2, ecolor='gray')
+    plt.errorbar(
+        interfranjas[no_descartados], flechas[no_descartados], yerr=error_flechas,
+        fmt='s', color='black', capsize=4, elinewidth=1.2, ecolor='gray'
+    )
+    plt.errorbar(
+        interfranjas[descartados], flechas[descartados], yerr=error_flechas,
+        fmt='s', color='red', capsize=4, elinewidth=1.2, ecolor='lightcoral'
+    )
     plt.plot(x, y, linestyle='--', color='black', linewidth=1.5)
     plt.xlabel("Interfranjas [px]")
     plt.ylabel("Flechas [px]")
@@ -391,10 +481,12 @@ def plot_flechas_interfranjas(flechas, interfranjas, error_flechas=2.0, save_pat
         plt.savefig(save_path)
     plt.show()
 
+    print(f"La desviación máxima de planitud es {pendiente*WAVELENGTH_NM/2:.2f} nm.")
+
 
 if __name__ == "__main__":
     # Ruta de tu imagen o directorio con imágenes que comienzan con un número
-    image_path = r"/home/pablo/OneDrive/Documentos/INTI-Calibraciones/Planos/INTI Rosario 2024/Plano/Camara alejada/Transmision_SO"  # noqa: E501
+    image_path = r"/home/pablo/OneDrive/Documentos/INTI-Calibraciones/Planos/Mitutoyo 2025/Calibración"  # noqa: E501
 
     # Ejecutar el análisis
     analyze_dir_or_image(image_path)
