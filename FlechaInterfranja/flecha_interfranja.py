@@ -29,6 +29,7 @@ FIND_FRINGES_APERTURE_IN_SEARCH = 0.3
 REQUIRED_IMS = 10
 RESULTS_DIR = "results"
 IQR_FACTOR_IMS = 1.0
+IQR_FACTOR_POINTS_IN_FRINGES = 1.5
 
 SHOW_ALL = False
 SHOW_EACH_RESULT = False
@@ -36,7 +37,7 @@ SAVE_RESULTS = True
 PLOT_CIRCLES_DEBUG = False
 
 # Ruta de tu imagen o directorio con imágenes que comienzan con un número
-image_path = r"/home/pablo/OneDrive/Documentos/INTI-Calibraciones/Planos/LMD 2025/Imágenes/BOTTOM"  # noqa: E501
+image_path = r"/home/pablo/OneDrive/Documentos/INTI-Calibraciones/Planos/LMD 2025/Imágenes/TOP"  # noqa: E501
 output_dir = os.path.join(image_path, RESULTS_DIR)
 os.makedirs(output_dir, exist_ok=True)
 logging.basicConfig(
@@ -464,7 +465,9 @@ def analyze_interference(image_path):
     max_distance_negative = np.zeros(len(all_distances))
     mask_outliers = []
     for i, distances in enumerate(all_distances):
-        mask = eliminar_outliers_iqr(distances, return_mask=True, iqr_factor=2.0)
+        mask = eliminar_outliers_iqr(
+            distances, return_mask=True, iqr_factor=IQR_FACTOR_POINTS_IN_FRINGES
+        )
         distances = distances[mask]
         mask_outliers.append(mask)
         max_distance_positive[i] = np.max(distances)
@@ -493,7 +496,7 @@ def analyze_interference(image_path):
         output_dir = os.path.join(os.path.dirname(image_path), RESULTS_DIR)
         os.makedirs(output_dir, exist_ok=True)
         file_name = os.path.splitext(os.path.basename(image_path))[0]
-        plt.savefig(os.path.join(output_dir, f"{file_name}.svg"))    
+        plt.savefig(os.path.join(output_dir, f"{file_name}.svg"))
     if SHOW_EACH_RESULT:
         plt.show()
     plt.close()
