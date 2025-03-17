@@ -10,6 +10,7 @@ from uncertainties import ufloat
 from uncertainties.unumpy import nominal_values
 import os
 import re
+import logging
 
 WAVELENGTH_NM = 633
 
@@ -22,16 +23,29 @@ GAUSSIAN_BLUR_KERNEL_SIZE_CIRCLE = 51
 HOUGH_PARAM1 = 5
 HOUGH_PARAM2 = 5
 FRACTION_OF_SEPARATION_TO_SEARCH_FRINGES = 0.8
-MINIMUM_DISTANCE_FROM_EDGES = 15
+MINIMUM_DISTANCE_FROM_EDGES = 70
 FIND_FRINGES_STEP = 25       # px
-FIND_FRINGES_APERTURE = 8   # px
+FIND_FRINGES_APERTURE_IN_SEARCH = 0.3
 REQUIRED_IMS = 10
 RESULTS_DIR = "results"
-IQR_FACTOR_IMS = 0.5
+IQR_FACTOR_IMS = 1.0
 
 SHOW_ALL = False
 SHOW_EACH_RESULT = False
 SAVE_RESULTS = True
+PLOT_CIRCLES_DEBUG = False
+
+# Ruta de tu imagen o directorio con imágenes que comienzan con un número
+image_path = r"/home/pablo/OneDrive/Documentos/INTI-Calibraciones/Planos/LMD 2025/Imágenes/BOTTOM"  # noqa: E501
+output_dir = os.path.join(image_path, RESULTS_DIR)
+os.makedirs(output_dir, exist_ok=True)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S',
+    handlers=[logging.FileHandler(f'{output_dir}/flecha_interfranja.log'),
+              logging.StreamHandler()]
+)
 
 
 def scaledLinearOp_To_array(scaledLinearOp):
@@ -39,10 +53,13 @@ def scaledLinearOp_To_array(scaledLinearOp):
     return scaledLinearOp.matmat(identity)
 
 
-def rotate_image_to_max_frequency(img_array, ignore_low_freq_pixels=2):
+def rotate_image_to_max_frequency(img_array, ignore_low_freq_pixels=2, precision=3):
     Nr, Nc = img_array.shape
+    Nr *= precision
+    Nc *= precision
+    ignore_low_freq_pixels *= precision
     # Calcular la transformada de Fourier 2D
-    fft_img = fftpack.fft2(img_array)
+    fft_img = fftpack.fft2(img_array, shape=(Nr, Nc))
 
     # Ignorar la componente continua y una cierta cantidad de pixeles aledaños
     fft_img[0, 0] = 0  # componente continua
@@ -52,11 +69,26 @@ def rotate_image_to_max_frequency(img_array, ignore_low_freq_pixels=2):
     # Encontrar el máximo de frecuencia espacial en el tercer o cuarto cuadrante
     fft_img = fft_img[:Nr//2, :]
     max_freq_idx = np.unravel_index(np.argmax(np.abs(fft_img)), fft_img.shape)
+
     if max_freq_idx[1] > Nc//2:
         max_freq_idx = (max_freq_idx[0], max_freq_idx[1] - Nc)
 
     # Calcular el ángulo de rotación
     angle = np.arctan2(max_freq_idx[0], max_freq_idx[1])
+
+    # Proponer varios ángulos posibles
+    range_angle_deg = 8
+    n_range_angle = 11
+    variations_cum = np.zeros(n_range_angle)
+    range_angle_rad = np.deg2rad(range_angle_deg)
+    possible_angles = np.linspace(angle - range_angle_rad, angle + range_angle_rad,
+                                  n_range_angle)
+    for ka, angle in enumerate(possible_angles):
+        rotated_img = rotate(img_array, angle * 180 / np.pi, mode='nearest',
+                             reshape=False)
+        cumulative_intensity = np.sum(rotated_img, axis=0)
+        variations_cum[ka] = np.var(cumulative_intensity)
+    angle = possible_angles[np.argmax(variations_cum)]
 
     # Rotar la imagen
     rotated_img = rotate(img_array, angle * 180 / np.pi, mode='nearest', reshape=False)
@@ -89,7 +121,7 @@ def search_points_in_valley(img, x, y, step=1, aperture=1):
     while True:
         new_min_y = y_prev - step
         inspect_values = img[new_min_y, x_prev + array_aperture]
-        if np.all(inspect_values == edge_value):
+        if np.any(inspect_values == edge_value):
             break
         new_min_x = np.argmin(inspect_values) + x_prev - aperture
         new_points.append((new_min_x, new_min_y))
@@ -220,7 +252,7 @@ def analyze_dir_or_image(image_path):
                 if re.match(r'^\d+', image_file) is not None and cv2.haveImageReader(
                     image_file_path
                 ):
-                    print(f"Analizando {image_file}")
+                    logging.info("Analizando %s", image_file)
 
                     i, f = analyze_interference(image_file_path)
 
@@ -232,9 +264,9 @@ def analyze_dir_or_image(image_path):
             image_files = np.array(image_files)
 
             if len(flechas) < REQUIRED_IMS:
-                print(
+                logging.info(
                     "No se encontraron suficientes imagenes para el análisis de acuerdo "
-                    f"al procedimiento ({REQUIRED_IMS} imágenes)."
+                    "al procedimiento (%s imágenes).", REQUIRED_IMS
                 )
 
             if SAVE_RESULTS:
@@ -302,11 +334,21 @@ def analyze_interference(image_path):
                               GAUSSIAN_BLUR_SIGMA_CIRCLE)
 
     # Usar HoughCircles para detectar el círculo
-    circles = cv2.HoughCircles(blurred, cv2.HOUGH_GRADIENT, dp=1.8, minDist=100,
-                               param1=HOUGH_PARAM1, param2=HOUGH_PARAM2, minRadius=100,
+    circles = cv2.HoughCircles(blurred, cv2.HOUGH_GRADIENT, dp=1.8, minDist=400,
+                               param1=HOUGH_PARAM1, param2=HOUGH_PARAM2, minRadius=400,
                                maxRadius=0)
 
     if circles is not None:
+        if PLOT_CIRCLES_DEBUG:
+            plt.figure(figsize=(8, 6))
+            plt.title("Círculos Detectado")
+            for circle in circles[0, :]:
+                center_x, center_y, radius = np.uint16(np.around(circle))
+                cv2.circle(blurred, (center_x, center_y), radius, (255, 0, 0), 2)
+                cv2.circle(blurred, (center_x, center_y), 2, (255, 0, 0), 3)
+            plt.imshow(blurred, cmap='gray')
+            plt.show()
+
         circles = np.round(circles[0, :]).astype("int")
         # Tomar el primer círculo detectado
         circle = circles[0]
@@ -359,25 +401,41 @@ def analyze_interference(image_path):
     x_positions = np.array(x_positions)
     y_positions = np.array(y_positions)
 
+    # Detección de puntos sospechosos
+    difs = np.diff(x_positions)
+    avg_dif = np.median(difs)
+    inliers = np.abs(difs - avg_dif) < n_search_fringe
+    inliers = np.insert(inliers, 0, True)
+
     # Ploteo de los mínimos detectados en la imagen original
     if SHOW_ALL:
         plt.figure(figsize=(10, 6))
         plt.title("Mínimos Detectados en la Imagen")
         plt.imshow(blur_masked, cmap='gray')
-        plt.plot(x_positions, y_positions, 'ro', label='Mínimos detectados')
+        plt.plot(x_positions[inliers], y_positions[inliers], 'ro',
+                 label='Mínimos detectados')
+        plt.plot(x_positions[~inliers], y_positions[~inliers], 'rx',
+                 label='Mínimos descartados')
         plt.legend()
         plt.show()
 
+    x_positions = x_positions[inliers]
+    y_positions = y_positions[inliers]
+
     # Encontrar franjas de interferometría
     n_fringes = len(x_positions)
-    print(f"Encontradas {n_fringes} franjas.")
     fringes = [None] * n_fringes
+    find_fringes_aperture = int(n_search_fringe * FIND_FRINGES_APERTURE_IN_SEARCH)
+    logging.info(
+        "Encontradas %d franjas. Buscando puntos cada %d filas, en rango de %d pixeles.",
+        n_fringes, FIND_FRINGES_STEP, find_fringes_aperture,
+    )
     for i, (x, y) in enumerate(zip(x_positions, y_positions)):
         # Encontrar los puntos más oscuros dentro de la franja subiendo y bajando
         upper_points = search_points_in_valley(blur_masked, x, y, FIND_FRINGES_STEP,
-                                               FIND_FRINGES_APERTURE)
+                                               find_fringes_aperture)
         lower_points = search_points_in_valley(blur_masked, x, y, -FIND_FRINGES_STEP,
-                                               FIND_FRINGES_APERTURE)
+                                               find_fringes_aperture)
 
         # Unir los puntos de arriba y abajo en una sola franja
         fringes[i] = np.concatenate((upper_points[::-1], [(x, y)], lower_points))
@@ -395,7 +453,8 @@ def analyze_interference(image_path):
     error_mean_distance = std_distance / np.sqrt(len(distances))
     interfringe_distance = ufloat(mean_distance, error_mean_distance)
     """
-    print("Distancias media entre rectas:", interfringe_distance, " (k=1)")
+
+    logging.info("Distancias media entre rectas: %s (k=1)", interfringe_distance)
 
     # Calcular desviación máxima de la recta
     all_distances = distances_sets_of_points_to_lines(
@@ -414,7 +473,7 @@ def analyze_interference(image_path):
     max_total_distance = np.max(total_distances)
     error_max_distance = np.std(total_distances) / np.sqrt(len(total_distances))
     flecha = ufloat(max_total_distance, error_max_distance)
-    print("Desviación máxima de la recta:", flecha, " (k=1)")
+    logging.info("Desviación máxima de la recta: %s (k=1)", flecha)
 
     # Ploteo de los mínimos detectados en la imagen original
     colores = ['r', 'g', 'b']
@@ -434,7 +493,7 @@ def analyze_interference(image_path):
         output_dir = os.path.join(os.path.dirname(image_path), RESULTS_DIR)
         os.makedirs(output_dir, exist_ok=True)
         file_name = os.path.splitext(os.path.basename(image_path))[0]
-        plt.savefig(os.path.join(output_dir, f"{file_name}.svg"))
+        plt.savefig(os.path.join(output_dir, f"{file_name}.svg"))    
     if SHOW_EACH_RESULT:
         plt.show()
     plt.close()
@@ -481,12 +540,11 @@ def plot_flechas_interfranjas(
         plt.savefig(save_path)
     plt.show()
 
-    print(f"La desviación máxima de planitud es {pendiente*WAVELENGTH_NM/2:.2f} nm.")
+    logging.info(
+        "La desviación máxima de planitud es %.2f nm.", pendiente * WAVELENGTH_NM / 2
+    )
 
 
 if __name__ == "__main__":
-    # Ruta de tu imagen o directorio con imágenes que comienzan con un número
-    image_path = r"/home/pablo/OneDrive/Documentos/INTI-Calibraciones/Planos/Mitutoyo 2025/Calibración"  # noqa: E501
-
     # Ejecutar el análisis
     analyze_dir_or_image(image_path)
