@@ -286,17 +286,23 @@ def analyze_dir_or_image(image_path):
         analyze_interference(image_path)
 
 
-def analyze_interference(image_path):
-    # Cargar la imagen en escala de grises
-    img = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
-    if img is None:
-        raise ValueError("No se pudo cargar la imagen. Verifica la ruta del archivo.")
+def analyze_interference(image_path=None, image_array=None, show=SHOW_ALL,
+                         show_result=SHOW_EACH_RESULT, save=SAVE_RESULTS):
+    assert image_path is not None or image_array is not None
+
+    if image_array is None:
+        # Cargar la imagen en escala de grises
+        img = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
+        if img is None:
+            raise ValueError("No se pudo cargar la imagen. Verifica la ruta del archivo.")
+    else:
+        img = image_array
 
     # Rotar la imagen para dejar las franjas más o menos verticales
     img_rotada = rotate_image_to_max_frequency(img)
 
     # Mostrar la imagen original y la rotada
-    if SHOW_ALL:
+    if show:
         fig, axs = plt.subplots(1, 2, figsize=(16, 6))
         axs[0].title.set_text("Imagen Original")
         axs[0].imshow(img, cmap='gray')
@@ -319,7 +325,7 @@ def analyze_interference(image_path):
                           prominence=PROMINENCE_PEAKS)
 
     # Ploteo de los mínimos detectados en el perfil de intensidad
-    if SHOW_ALL:
+    if show:
         plt.figure(figsize=(8, 6))
         plt.title("Detección de Mínimos en el Perfil de Intensidad")
         plt.plot(intensity_profile, label='Perfil de intensidad')
@@ -362,7 +368,7 @@ def analyze_interference(image_path):
         cv2.circle(output, (center_x, center_y), radius, (255, 0, 0), 2)
         cv2.circle(output, (center_x, center_y), 2, (255, 0, 0), 3)
 
-        if SHOW_ALL:
+        if show:
             plt.figure(figsize=(8, 6))
             plt.title("Círculo Detectado")
             plt.imshow(output, cmap='gray')
@@ -409,7 +415,7 @@ def analyze_interference(image_path):
     inliers = np.insert(inliers, 0, True)
 
     # Ploteo de los mínimos detectados en la imagen original
-    if SHOW_ALL:
+    if show:
         plt.figure(figsize=(10, 6))
         plt.title("Mínimos Detectados en la Imagen")
         plt.imshow(blur_masked, cmap='gray')
@@ -492,12 +498,12 @@ def analyze_interference(image_path):
         x_fit = slope * fringe[:, 1] + intercepts[i]
         plt.plot(x_fit, fringe[:, 1], color=colores[i % len(colores)], linestyle='--')
     plt.legend()
-    if SAVE_RESULTS:
+    if save:
         output_dir = os.path.join(os.path.dirname(image_path), RESULTS_DIR)
         os.makedirs(output_dir, exist_ok=True)
         file_name = os.path.splitext(os.path.basename(image_path))[0]
         plt.savefig(os.path.join(output_dir, f"{file_name}.svg"))
-    if SHOW_EACH_RESULT:
+    if show_result:
         plt.show()
     plt.close()
 
