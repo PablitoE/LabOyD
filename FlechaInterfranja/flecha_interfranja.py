@@ -12,11 +12,12 @@ import os
 import re
 import logging
 
+
 WAVELENGTH_NM = 633
 
 MINIMUM_DISTANCE_PEAKS = 10
 PROMINENCE_PEAKS = 1
-GAUSSIAN_BLUR_SIGMA = 4
+GAUSSIAN_BLUR_SIGMA = 2
 GAUSSIAN_BLUR_KERNEL_SIZE = 17
 GAUSSIAN_BLUR_SIGMA_CIRCLE = 16
 GAUSSIAN_BLUR_KERNEL_SIZE_CIRCLE = 51
@@ -24,6 +25,7 @@ HOUGH_PARAM1 = 5
 HOUGH_PARAM2 = 5
 FRACTION_OF_SEPARATION_TO_SEARCH_FRINGES = 0.8
 MINIMUM_DISTANCE_FROM_EDGES = 70
+DISCARD_EDGE_POINTS = 2
 FIND_FRINGES_STEP = 25       # px
 FIND_FRINGES_APERTURE_IN_SEARCH = 0.3
 REQUIRED_IMS = 10
@@ -40,13 +42,7 @@ PLOT_CIRCLES_DEBUG = False
 image_path = r"/home/pablo/OneDrive/Documentos/INTI-Calibraciones/Planos/LMD 2025/Imágenes/TOP"  # noqa: E501
 output_dir = os.path.join(image_path, RESULTS_DIR)
 os.makedirs(output_dir, exist_ok=True)
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    datefmt='%Y-%m-%d %H:%M:%S',
-    handlers=[logging.FileHandler(f'{output_dir}/flecha_interfranja.log'),
-              logging.StreamHandler()]
-)
+logger = logging.getLogger(__name__)
 
 
 def scaledLinearOp_To_array(scaledLinearOp):
@@ -114,7 +110,7 @@ def enmascarar_imagen(img, center_x, center_y, radius):
         raise ValueError("El tipo de la imagen debe ser uint8 o float32.")
 
 
-def search_points_in_valley(img, x, y, step=1, aperture=1):
+def search_points_in_valley(img, x, y, step=1, aperture=1, discard_last_points=0):
     edge_value = img[0, 0]
     array_aperture = np.arange(-aperture, aperture + 1)
     x_prev, y_prev = x, y
@@ -128,6 +124,8 @@ def search_points_in_valley(img, x, y, step=1, aperture=1):
         new_points.append((new_min_x, new_min_y))
         x_prev, y_prev = new_min_x, new_min_y
     new_points = np.array(new_points)
+    if new_points.shape[0] > discard_last_points:
+        new_points = new_points[:-discard_last_points]
     return np.reshape(new_points, (-1, 2))
 
 
@@ -231,13 +229,13 @@ def eliminar_outliers_iqr(data, return_mask=False, iqr_factor=1.5, only_upper=Fa
     return data[mask]
 
 
-def analyze_dir_or_image(image_path):
+def analyze_dir_or_image(image_path, reutilize_saved_results=True):
     if os.path.isdir(image_path):
         output_dir = os.path.join(image_path, RESULTS_DIR)
         if SAVE_RESULTS:
             os.makedirs(output_dir, exist_ok=True)
         save_mid_results_path = os.path.join(output_dir, "flechas_vs_interfranjas.npz")
-        if os.path.isfile(save_mid_results_path) and input(
+        if reutilize_saved_results and os.path.isfile(save_mid_results_path) and input(
             "Los resultados ya fueron guardados. ¿Deseas utilizarlos? [Y/n]"
         ) != "n":
             archivo = np.load(save_mid_results_path)
@@ -250,9 +248,10 @@ def analyze_dir_or_image(image_path):
             image_files = []
             for image_file in os.listdir(image_path):
                 image_file_path = os.path.join(image_path, image_file)
-                if re.match(r'^\d+', image_file) is not None and cv2.haveImageReader(
-                    image_file_path
-                ):
+                if (
+                    re.match(r'^\d+', image_file) is not None
+                    or re.match(r'^[\w\-\s\.]+?\d+\.[A-Za-z0-9]+$', image_file) is not None
+                ) and cv2.haveImageReader(image_file_path):
                     logging.info("Analizando %s", image_file)
 
                     i, f = analyze_interference(image_file_path)
@@ -440,9 +439,9 @@ def analyze_interference(image_path=None, image_array=None, show=SHOW_ALL,
     for i, (x, y) in enumerate(zip(x_positions, y_positions)):
         # Encontrar los puntos más oscuros dentro de la franja subiendo y bajando
         upper_points = search_points_in_valley(blur_masked, x, y, FIND_FRINGES_STEP,
-                                               find_fringes_aperture)
+                                               find_fringes_aperture, discard_last_points=DISCARD_EDGE_POINTS)
         lower_points = search_points_in_valley(blur_masked, x, y, -FIND_FRINGES_STEP,
-                                               find_fringes_aperture)
+                                               find_fringes_aperture, discard_last_points=DISCARD_EDGE_POINTS)
 
         # Unir los puntos de arriba y abajo en una sola franja
         fringes[i] = np.concatenate((upper_points[::-1], [(x, y)], lower_points))
@@ -467,8 +466,8 @@ def analyze_interference(image_path=None, image_array=None, show=SHOW_ALL,
     all_distances = distances_sets_of_points_to_lines(
         fringes, slope, intercepts, signed=True
     )
-    max_distance_positive = np.zeros(len(all_distances))
-    max_distance_negative = np.zeros(len(all_distances))
+    max_distance_positive = np.zeros(len(all_distances), dtype=[('index', int), ('value', float)])
+    max_distance_negative = np.zeros(len(all_distances), dtype=[('index', int), ('value', float)])
     mask_outliers = []
     for i, distances in enumerate(all_distances):
         mask = eliminar_outliers_iqr(
@@ -476,10 +475,12 @@ def analyze_interference(image_path=None, image_array=None, show=SHOW_ALL,
         )
         distances = distances[mask]
         mask_outliers.append(mask)
-        max_distance_positive[i] = np.max(distances)
-        max_distance_negative[i] = np.min(distances)
-    total_distances = max_distance_positive - max_distance_negative
-    max_total_distance = np.max(total_distances)
+        max_distance_positive[i]['index'] = np.argmax(distances)
+        max_distance_negative[i]['index'] = np.argmin(distances)
+        max_distance_positive[i]['value'] = distances[max_distance_positive[i]['index']]
+        max_distance_negative[i]['value'] = distances[max_distance_negative[i]['index']]
+    total_distances = max_distance_positive['value'] - max_distance_negative['value']
+    max_total_distance = np.max(total_distances).astype(float)
     error_max_distance = np.std(total_distances) / np.sqrt(len(total_distances))
     flecha = ufloat(max_total_distance, error_max_distance)
     logging.info("Desviación máxima de la recta: %s (k=1)", flecha)
@@ -491,8 +492,13 @@ def analyze_interference(image_path=None, image_array=None, show=SHOW_ALL,
     plt.imshow(blur_masked, cmap='gray')
     for i, fringe in enumerate(fringes):
         good_ones = mask_outliers[i]
-        plt.plot(fringe[good_ones, 0], fringe[good_ones, 1], 'o',
+        good_ones_dots = fringe[good_ones]
+        plt.plot(good_ones_dots[:, 0], good_ones_dots[:, 1], 'o',
                  color=colores[i % len(colores)], label=f'Franja #{i}')
+        plt.plot(good_ones_dots[max_distance_positive[i]['index'], 0],
+                 good_ones_dots[max_distance_positive[i]['index'], 1], 'o', color=colores[i % len(colores)], markersize=10)
+        plt.plot(good_ones_dots[max_distance_negative[i]['index'], 0],
+                 good_ones_dots[max_distance_negative[i]['index'], 1], 'o', color=colores[i % len(colores)], markersize=10)
         plt.plot(fringe[~good_ones, 0], fringe[~good_ones, 1], 'x',
                  color=colores[i % len(colores)])
         x_fit = slope * fringe[:, 1] + intercepts[i]
@@ -510,10 +516,8 @@ def analyze_interference(image_path=None, image_array=None, show=SHOW_ALL,
     return interfringe_distance, flecha
 
 
-def plot_flechas_interfranjas(
-    flechas, interfranjas, error_flechas=2.0, save_path=None, iqr_factor=0.75
-):
-    pendiente, intercepto, r_value, p_value, std_err = linregress(interfranjas, flechas)
+def analisis_flechas_interfranjas(flechas, interfranjas, iqr_factor=0.75, full_output=True):
+    pendiente, intercepto, _, _, std_err = linregress(interfranjas, flechas)
 
     y = pendiente * interfranjas + intercepto
     errores = np.abs(flechas - y)
@@ -525,12 +529,24 @@ def plot_flechas_interfranjas(
     no_descartados = np.where(mask_buenos)[0]
 
     if np.any(~mask_buenos):
-        pendiente, intercepto, r_value, p_value, std_err = linregress(
+        pendiente, intercepto, _, _, std_err = linregress(
             interfranjas[no_descartados], flechas[no_descartados]
         )
     x = np.linspace(interfranjas.min(), interfranjas.max(), 4)
     y = pendiente * x + intercepto
     pendiente_u = ufloat(pendiente, std_err)
+    if full_output:
+        return pendiente_u, x, y, descartados, no_descartados
+    else:
+        return pendiente_u
+
+
+def plot_flechas_interfranjas(
+    flechas, interfranjas, error_flechas=2.0, save_path=None, iqr_factor=0.75
+):
+    pendiente_u, x, y, descartados, no_descartados = analisis_flechas_interfranjas(
+        flechas, interfranjas, iqr_factor=iqr_factor
+    )
 
     plt.figure(figsize=(8, 6))
     plt.title(f"Flechas vs Interfranjas. Pendiente: {pendiente_u} (k=1)")
@@ -550,10 +566,18 @@ def plot_flechas_interfranjas(
     plt.show()
 
     logging.info(
-        "La desviación máxima de planitud es %.2f nm.", pendiente * WAVELENGTH_NM / 2
+        "La desviación máxima de planitud es %.2f nm.", pendiente_u * WAVELENGTH_NM / 2
     )
 
 
 if __name__ == "__main__":
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(levelname)s - %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S',
+        handlers=[logging.FileHandler(f'{output_dir}/flecha_interfranja.log'),
+                  logging.StreamHandler()]
+    )
+
     # Ejecutar el análisis
     analyze_dir_or_image(image_path)
