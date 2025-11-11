@@ -18,6 +18,7 @@ WAVELENGTH_NM = 633
 MINIMUM_DISTANCE_PEAKS = 10
 PROMINENCE_PEAKS = 1
 GAUSSIAN_BLUR_SIGMA = 2
+GAUSSIAN_BLUR_SIGMAY_FACTOR = 2
 GAUSSIAN_BLUR_KERNEL_SIZE = 17
 GAUSSIAN_BLUR_SIGMA_CIRCLE = 16
 GAUSSIAN_BLUR_KERNEL_SIZE_CIRCLE = 51
@@ -86,16 +87,17 @@ def rotate_image_to_max_frequency(img_array, ignore_low_freq_pixels=2, precision
         cumulative_intensity = np.sum(rotated_img, axis=0)
         variations_cum[ka] = np.var(cumulative_intensity)
     angle = possible_angles[np.argmax(variations_cum)]
+    angle = angle * 180 / np.pi
 
     # Rotar la imagen
-    rotated_img = rotate(img_array, angle * 180 / np.pi, mode='nearest', reshape=False)
+    rotated_img = rotate(img_array, angle, mode='nearest', reshape=False)
 
-    return rotated_img
+    return rotated_img, angle
 
 
 def blurrear_imagen(img, kernel_size=GAUSSIAN_BLUR_KERNEL_SIZE,
-                    sigma=GAUSSIAN_BLUR_SIGMA):
-    return cv2.GaussianBlur(img, (kernel_size, kernel_size), sigma)
+                    sigma=GAUSSIAN_BLUR_SIGMA, sigmaY_factor=0):
+    return cv2.GaussianBlur(img, (kernel_size, kernel_size), sigma, sigmaY=sigmaY_factor * sigma)
 
 
 def enmascarar_imagen(img, center_x, center_y, radius):
@@ -209,7 +211,7 @@ def obtener_gaussiana_2D(img):
     # Ajustar la curva con la gaussiana 2D
     p0 = np.array([1, img.shape[1]/2, img.shape[0]/2, 10, 10])
     XY = np.vstack((X.ravel(), Y.ravel()))
-    popt, _ = curve_fit(gaussiana_2d, XY, img.ravel(), p0=p0)
+    popt, _ = curve_fit(gaussiana_2d, XY, img.ravel(), p0=p0, xtol=1e-6, ftol=1e-6, maxfev=1000)
     z_values = gaussiana_2d(XY, *popt)
     return z_values.reshape(img.shape)
 
@@ -285,8 +287,30 @@ def analyze_dir_or_image(image_path, reutilize_saved_results=True):
         analyze_interference(image_path)
 
 
+def plot_rotation(img, img_rotada, angle):
+    fig, axs = plt.subplots(1, 2, figsize=(16, 6))
+    axs[0].title.set_text("Imagen Original")
+    axs[0].imshow(img, cmap='gray')
+    axs[1].title.set_text("Imagen Rotada {}°".format(angle))
+    im = axs[1].imshow(img_rotada, cmap='gray')
+    fig.colorbar(im, ax=axs[1])
+    plt.show()
+
+
+def plot_minima_profile(profile, minima_indices):
+    plt.figure()
+    plt.title("Detección de Mínimos en el Perfil de Intensidad")
+    plt.plot(profile, label='Perfil de intensidad')
+    plt.plot(minima_indices, profile[minima_indices], 'ro', label='Mínimos detectados')
+    plt.xlabel('Posición (píxeles)')
+    plt.ylabel('Intensidad promedio')
+    plt.legend()
+    plt.show()
+
+
 def analyze_interference(image_path=None, image_array=None, show=SHOW_ALL,
-                         show_result=SHOW_EACH_RESULT, save=SAVE_RESULTS):
+                         show_result=SHOW_EACH_RESULT, save=SAVE_RESULTS,
+                         debugging_info=None):
     assert image_path is not None or image_array is not None
 
     if image_array is None:
@@ -298,24 +322,19 @@ def analyze_interference(image_path=None, image_array=None, show=SHOW_ALL,
         img = image_array
 
     # Rotar la imagen para dejar las franjas más o menos verticales
-    img_rotada = rotate_image_to_max_frequency(img)
+    img_rotada, angle_rotated = rotate_image_to_max_frequency(img)
+
+    if debugging_info is not None:
+        debugging_info["rotation_angle_estimated"] = angle_rotated
 
     # Mostrar la imagen original y la rotada
     if show:
-        fig, axs = plt.subplots(1, 2, figsize=(16, 6))
-        axs[0].title.set_text("Imagen Original")
-        axs[0].imshow(img, cmap='gray')
-        axs[1].title.set_text("Imagen Rotada")
-        im = axs[1].imshow(img_rotada, cmap='gray')
-        fig.colorbar(im, ax=axs[1])
-        plt.show()
-
-    img = img_rotada
+        plot_rotation(img, img_rotada, angle_rotated)
 
     # Detectar franjas de interferometría
     # Sumar la intensidad a lo largo de las filas para proyectar las franjas
-    blurred_for_analysis = blurrear_imagen(img, GAUSSIAN_BLUR_KERNEL_SIZE,
-                                           GAUSSIAN_BLUR_SIGMA)
+    blurred_for_analysis = blurrear_imagen(img_rotada, GAUSSIAN_BLUR_KERNEL_SIZE,
+                                           GAUSSIAN_BLUR_SIGMA, GAUSSIAN_BLUR_SIGMAY_FACTOR)
     intensity_profile = np.mean(blurred_for_analysis, axis=0)
     intensity_profile = remove_gaussian_from_curve(intensity_profile)
 
@@ -325,18 +344,11 @@ def analyze_interference(image_path=None, image_array=None, show=SHOW_ALL,
 
     # Ploteo de los mínimos detectados en el perfil de intensidad
     if show:
-        plt.figure(figsize=(8, 6))
-        plt.title("Detección de Mínimos en el Perfil de Intensidad")
-        plt.plot(intensity_profile, label='Perfil de intensidad')
-        plt.plot(peaks, intensity_profile[peaks], 'ro', label='Mínimos detectados')
-        plt.xlabel('Posición (píxeles)')
-        plt.ylabel('Intensidad promedio')
-        plt.legend()
-        plt.show()
+        plot_minima_profile(intensity_profile, peaks)
 
     # Detectar el círculo principal que contiene las franjas
     # Aplicar un desenfoque para reducir ruido
-    blurred = blurrear_imagen(img, GAUSSIAN_BLUR_KERNEL_SIZE_CIRCLE,
+    blurred = blurrear_imagen(img_rotada, GAUSSIAN_BLUR_KERNEL_SIZE_CIRCLE,
                               GAUSSIAN_BLUR_SIGMA_CIRCLE)
 
     # Usar HoughCircles para detectar el círculo
@@ -391,6 +403,10 @@ def analyze_interference(image_path=None, image_array=None, show=SHOW_ALL,
     # Encontrar puntos de cada franja
     x_positions, y_positions = [], []
     avg_separation = np.mean(np.diff(peaks))
+    if np.isnan(avg_separation):
+        plot_rotation(img, img_rotada, angle_rotated)
+        plot_minima_profile(intensity_profile, peaks)
+        raise ValueError("No se encontraron franjas en la imagen.")
     n_search_fringe = int(avg_separation * FRACTION_OF_SEPARATION_TO_SEARCH_FRINGES) // 2
     y_range = np.arange(
         int(center_y - n_search_fringe), int(center_y + n_search_fringe + 1)
