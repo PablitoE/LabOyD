@@ -81,11 +81,11 @@ def worker(sim_id, simulated_deviation_nm, generator=None):
 
 
 if __name__ == "__main__":
-    MULTIPROCESSING = False
+    MULTIPROCESSING = True
     SAVE_PATH = "Data/Resultados/MonteCarloFEI"
     LOAD_FILENAME = ""
     logging.basicConfig(
-        level=logging.CRITICAL,
+        level=logging.INFO,
         format='%(asctime)s - %(levelname)s - %(message)s',
         datefmt='%Y-%m-%d %H:%M:%S',
         handlers=[logging.FileHandler(os.path.join(SAVE_PATH, "mc_flecha_interfranja.log")),
@@ -165,7 +165,7 @@ if __name__ == "__main__":
             mean_interfringe_rmse = np.sqrt(
                 np.mean((measured_interfringe_spacings - simulated_interfringe_spacings) ** 2, axis=0)
             )
-            _, axs = plt.subplots(1, 2)
+            _, axs = plt.subplots(1, 3)
             axs[0].plot(range(1, N_IMS_PER_SAMPLE + 1), mean_interfringe_rmse, 'o-')
             axs[1].plot(
                 range(1, N_IMS_PER_SAMPLE + 1), mean_interfringe_rmse / np.mean(simulated_interfringe_spacings, axis=0),
@@ -175,28 +175,36 @@ if __name__ == "__main__":
             axs[1].set_xlabel('Número de interferograma')
             axs[0].set_ylabel('RMSE del espaciamiento interfranja (píxeles)')
             axs[1].set_ylabel('RMSE del espaciamiento interfranja relativo al valor simulado')
-            axs[0].grid(True)
-            axs[1].grid(True)
+            axs[2].plot(
+                simulated_deviation_nm,
+                np.sqrt(np.mean((measured_interfringe_spacings - simulated_interfringe_spacings) ** 2)),
+                'o',
+            )
+            axs[2].set_xlabel('Desviación máxima simulada (nm)')
+            axs[2].set_ylabel('RMSE del espaciamiento interfranja (píxeles)')
+            for ax in axs:
+                ax.grid(True)
             plt.savefig(os.path.join(SAVE_PATH, "interfranja_rmse.png"))
 
         errors = np.sqrt(np.abs(nominal_values(measured_max_deviations) - simulated_deviation_nm) ** 2)
         logger.info(f"RMSE: {np.mean(errors)}")
-        logger.info(simulated_deviation_nm)
-        logger.info(measured_max_deviations)
+        # logger.info(simulated_deviation_nm)
+        # logger.info(measured_max_deviations)
         date = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         np.savez(os.path.join(SAVE_PATH, f"{date}_results.npz"), simulated_deviation_nm=simulated_deviation_nm,
                  measured_max_deviations=measured_max_deviations)
 
     coeffs = np.polyfit(simulated_deviation_nm, nominal_values(measured_max_deviations), 1)
-    poly1d_fn = np.poly1d(coeffs)
-    logger.info(f"Linear relationship: y = {coeffs[0]:.2f}x + {coeffs[1]:.2f}")
-    predicted_measured_deviations = poly1d_fn(simulated_deviation_nm)
+    proportionality_constant = np.sum(simulated_deviation_nm * nominal_values(measured_max_deviations)) / np.sum(
+        simulated_deviation_nm**2
+    )
+    predicted_measured_deviations = proportionality_constant * simulated_deviation_nm
+
     errors = np.sqrt(np.abs(nominal_values(measured_max_deviations) - predicted_measured_deviations) ** 2)
     logger.info(f"RMSE (lineal): {np.mean(errors)}")
 
     if PLOT_RESULTS:
         plt.figure(figsize=(8, 6))
-        print(simulated_deviation_nm)
         plt.plot(simulated_deviation_nm, nominal_values(measured_max_deviations), 'o')
         plt.plot(simulated_deviation_nm, predicted_measured_deviations, 'o-', label='Ajuste lineal')
         plt.xlabel('Desviación máxima simulada (nm)')

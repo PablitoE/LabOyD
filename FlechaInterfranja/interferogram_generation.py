@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 import os
 from scipy.ndimage import rotate, gaussian_filter
 from PIL import Image
+from scipy.signal import find_peaks
 
 
 class FlatInterferogramGenerator():
@@ -97,11 +98,18 @@ class FlatInterferogramGenerator():
             plt.ylabel('Píxeles')
             plt.show()
 
+    def get_maximum_simulated_deviation_px(self, phase):
+        phase[np.logical_not(self.aperture_mask)] = 0
+        central_cos = np.cos(phase[self.shape[0]//2])
+        minima = find_peaks(-central_cos)
+        for min
+
     def generate_flat_interferogram(self, normalized_carrier_frequency=0.1):
         kx = normalized_carrier_frequency
         ky = 0.0
 
         phase = 2 * np.pi * (kx * self.X + ky * self.Y + self.surface)
+        self.get_maximum_simulated_deviation_px(kx, phase)
         interferogram = 1 + self.visibility_ratio * np.cos(phase)
         interferogram *= self.aperture_mask
         interferogram = self.random_rotation(interferogram)

@@ -11,6 +11,7 @@ from uncertainties.unumpy import nominal_values
 import os
 import re
 import logging
+from Varios.busqueda import encontrar_maximo_cuadratica
 
 
 WAVELENGTH_NM = 633
@@ -22,6 +23,7 @@ GAUSSIAN_BLUR_SIGMAY_FACTOR = 2
 GAUSSIAN_BLUR_KERNEL_SIZE = 17
 GAUSSIAN_BLUR_SIGMA_CIRCLE = 16
 GAUSSIAN_BLUR_KERNEL_SIZE_CIRCLE = 51
+ROTATION_IGNORE_LOW_FREQ_PIXELS = 3
 HOUGH_PARAM1 = 5
 HOUGH_PARAM2 = 5
 FRACTION_OF_SEPARATION_TO_SEARCH_FRINGES = 0.8
@@ -53,41 +55,46 @@ def scaledLinearOp_To_array(scaledLinearOp):
 
 def rotate_image_to_max_frequency(img_array, ignore_low_freq_pixels=2, precision=3):
     Nr, Nc = img_array.shape
-    Nr *= precision
-    Nc *= precision
+    Nr_ = Nr * precision
+    Nc_ = Nc * precision
     ignore_low_freq_pixels *= precision
     # Calcular la transformada de Fourier 2D
-    fft_img = fftpack.fft2(img_array, shape=(Nr, Nc))
+    fft_img = fftpack.fftshift(fftpack.fft2(img_array, shape=(Nr_, Nc_)))
 
     # Ignorar la componente continua y una cierta cantidad de pixeles aledaños
-    fft_img[0, 0] = 0  # componente continua
-    fft_img[:ignore_low_freq_pixels, :ignore_low_freq_pixels] = 0  # pixeles aledaños
-    fft_img[:ignore_low_freq_pixels, Nc - ignore_low_freq_pixels:] = 0
+    fft_img[Nr_//2-ignore_low_freq_pixels:Nr_//2+ignore_low_freq_pixels,
+            Nc_//2-ignore_low_freq_pixels:Nc_//2+ignore_low_freq_pixels] = 0
 
-    # Encontrar el máximo de frecuencia espacial en el tercer o cuarto cuadrante
-    fft_img = fft_img[:Nr//2, :]
+    # Encontrar el máximo de frecuencia espacial en el primer o cuarto cuadrante
+    fft_img = fft_img[:, Nc_//2:]
     max_freq_idx = np.unravel_index(np.argmax(np.abs(fft_img)), fft_img.shape)
-
-    if max_freq_idx[1] > Nc//2:
-        max_freq_idx = (max_freq_idx[0], max_freq_idx[1] - Nc)
+    max_freq_idx = (Nr_//2 - max_freq_idx[0], max_freq_idx[1])
 
     # Calcular el ángulo de rotación
-    angle = np.arctan2(max_freq_idx[0], max_freq_idx[1])
+    angle = np.rad2deg(np.arctan2(max_freq_idx[0], max_freq_idx[1]))
 
     # Proponer varios ángulos posibles
-    range_angle_deg = 8
+    range_angle_deg = 4
     n_range_angle = 11
     variations_cum = np.zeros(n_range_angle)
-    range_angle_rad = np.deg2rad(range_angle_deg)
-    possible_angles = np.linspace(angle - range_angle_rad, angle + range_angle_rad,
+    possible_angles = np.linspace(angle - range_angle_deg, angle + range_angle_deg,
                                   n_range_angle)
+    cumulative_intensity = np.sum(img_array.astype(np.float64), axis=0)
+    if Nc % 2 == 0:
+        cumulative_intensity = cumulative_intensity[Nc//2:] + np.flip(cumulative_intensity[:Nc//2])
+    else:
+        cumulative_intensity = cumulative_intensity[(Nc//2)+1:] + np.flip(cumulative_intensity[:Nc//2])
+    cumulative_intensity /= np.sum(cumulative_intensity)
+    cumulative_intensity = np.cumsum(cumulative_intensity)
+    limit = np.where(cumulative_intensity > 0.95)[0][0]
+
     for ka, angle in enumerate(possible_angles):
-        rotated_img = rotate(img_array, angle * 180 / np.pi, mode='nearest',
-                             reshape=False)
+        rotated_img = rotate(img_array, angle, mode='nearest', reshape=False)
         cumulative_intensity = np.sum(rotated_img, axis=0)
-        variations_cum[ka] = np.var(cumulative_intensity)
-    angle = possible_angles[np.argmax(variations_cum)]
-    angle = angle * 180 / np.pi
+        variations_cum[ka] = np.var(cumulative_intensity[Nc // 2 - limit:Nc // 2 + limit])
+    angle, _ = encontrar_maximo_cuadratica(possible_angles, variations_cum)
+    if angle < possible_angles[0] or angle > possible_angles[-1]:
+        angle = possible_angles[np.argmax(variations_cum)]
 
     # Rotar la imagen
     rotated_img = rotate(img_array, angle, mode='nearest', reshape=False)
@@ -322,10 +329,13 @@ def analyze_interference(image_path=None, image_array=None, show=SHOW_ALL,
         img = image_array
 
     # Rotar la imagen para dejar las franjas más o menos verticales
-    img_rotada, angle_rotated = rotate_image_to_max_frequency(img)
+    img_rotada, angle_rotated = rotate_image_to_max_frequency(img,
+                                                              ignore_low_freq_pixels=ROTATION_IGNORE_LOW_FREQ_PIXELS)
 
     if debugging_info is not None:
         debugging_info["rotation_angle_estimated"] = angle_rotated
+        if "rotation_angle" in debugging_info.keys():
+            logger.info("Error en la estimación de la rotación: %s °", debugging_info["rotation_angle"] + angle_rotated)
 
     # Mostrar la imagen original y la rotada
     if show:
@@ -406,6 +416,9 @@ def analyze_interference(image_path=None, image_array=None, show=SHOW_ALL,
     if np.isnan(avg_separation):
         plot_rotation(img, img_rotada, angle_rotated)
         plot_minima_profile(intensity_profile, peaks)
+        img_rotada, angle_rotated = rotate_image_to_max_frequency(
+            img, ignore_low_freq_pixels=ROTATION_IGNORE_LOW_FREQ_PIXELS
+        )  # debugging
         raise ValueError("No se encontraron franjas en la imagen.")
     n_search_fringe = int(avg_separation * FRACTION_OF_SEPARATION_TO_SEARCH_FRINGES) // 2
     y_range = np.arange(
@@ -512,9 +525,11 @@ def analyze_interference(image_path=None, image_array=None, show=SHOW_ALL,
         plt.plot(good_ones_dots[:, 0], good_ones_dots[:, 1], 'o',
                  color=colores[i % len(colores)], label=f'Franja #{i}')
         plt.plot(good_ones_dots[max_distance_positive[i]['index'], 0],
-                 good_ones_dots[max_distance_positive[i]['index'], 1], 'o', color=colores[i % len(colores)], markersize=10)
+                 good_ones_dots[max_distance_positive[i]['index'], 1], 'o', color=colores[i % len(colores)],
+                 markersize=10)
         plt.plot(good_ones_dots[max_distance_negative[i]['index'], 0],
-                 good_ones_dots[max_distance_negative[i]['index'], 1], 'o', color=colores[i % len(colores)], markersize=10)
+                 good_ones_dots[max_distance_negative[i]['index'], 1], 'o', color=colores[i % len(colores)],
+                 markersize=10)
         plt.plot(fringe[~good_ones, 0], fringe[~good_ones, 1], 'x',
                  color=colores[i % len(colores)])
         x_fit = slope * fringe[:, 1] + intercepts[i]
