@@ -11,7 +11,7 @@ from uncertainties.unumpy import nominal_values
 import os
 import re
 import logging
-from Varios.busqueda import encontrar_maximo_cuadratica
+from Varios.optimizations import encontrar_maximo_cuadratica
 
 
 WAVELENGTH_NM = 633

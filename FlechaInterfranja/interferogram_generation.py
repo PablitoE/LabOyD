@@ -2,8 +2,10 @@ import numpy as np
 import matplotlib.pyplot as plt
 import os
 from scipy.ndimage import rotate, gaussian_filter
+from scipy.interpolate import make
 from PIL import Image
-from scipy.signal import find_peaks
+from skimage import measure
+from Varios.images import all_pixels_inside_border
 
 
 class FlatInterferogramGenerator():
@@ -100,16 +102,25 @@ class FlatInterferogramGenerator():
 
     def get_maximum_simulated_deviation_px(self, phase):
         phase[np.logical_not(self.aperture_mask)] = 0
-        central_cos = np.cos(phase[self.shape[0]//2])
-        minima = find_peaks(-central_cos)
-        for min
+        cos_phase = 1 + np.cos(phase)
+        contours = measure.find_contours(cos_phase, 0.01)
+        plt.imshow(cos_phase, cmap='jet')
+        for contour in contours:
+            pixels_inside = all_pixels_inside_border(contour, self.shape)
+
+            plt.plot(contour[:, 1], contour[:, 0], linewidth=2)
+        plt.title('Contornos de interferencia')
+        plt.xlabel('Píxeles')
+        plt.ylabel('Píxeles')
+        plt.colorbar(label='Intensidad')
+        plt.show()
 
     def generate_flat_interferogram(self, normalized_carrier_frequency=0.1):
         kx = normalized_carrier_frequency
         ky = 0.0
 
         phase = 2 * np.pi * (kx * self.X + ky * self.Y + self.surface)
-        self.get_maximum_simulated_deviation_px(kx, phase)
+        self.get_maximum_simulated_deviation_px(phase)
         interferogram = 1 + self.visibility_ratio * np.cos(phase)
         interferogram *= self.aperture_mask
         interferogram = self.random_rotation(interferogram)

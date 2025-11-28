@@ -81,7 +81,7 @@ def worker(sim_id, simulated_deviation_nm, generator=None):
 
 
 if __name__ == "__main__":
-    MULTIPROCESSING = True
+    MULTIPROCESSING = False
     SAVE_PATH = "Data/Resultados/MonteCarloFEI"
     LOAD_FILENAME = ""
     logging.basicConfig(
@@ -92,7 +92,7 @@ if __name__ == "__main__":
                   logging.StreamHandler()]
     )
 
-    N_MC_SAMPLES = 200
+    N_MC_SAMPLES = 1
     N_IMS_PER_SAMPLE = 10
     MIN_N_FRINGES = 7
     MAX_N_FRINGES = 20
