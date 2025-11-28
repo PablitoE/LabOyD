@@ -1,4 +1,5 @@
 import numpy as np
+from scipy.interpolate import make_splprep
 
 
 def encontrar_maximo_cuadratica(arr_x, arr_y=None):
@@ -20,3 +21,20 @@ def encontrar_maximo_cuadratica(arr_x, arr_y=None):
     max_y = poly(max_x)
 
     return max_x, max_y
+
+
+def spline_zeros(rc, z):
+    """
+    Find a smooth spline curve that passes through the points (r, c) that are zero, where z >= 0.
+    ETERNO
+    """
+    new_order = np.argsort(rc[:, 0])
+    xy = np.fliplr(rc[new_order])
+    z = z[new_order]
+    w = 1 / z
+    spline, u = make_splprep(xy.T, w=w, s=z.size)
+    xy_out = np.zeros((xy[-1, 1] - xy[0, 1] + 1, 2))
+    xy_out[:, 1] = np.arange(xy[0, 1], xy[-1, 1] + 1)
+    for i, y in enumerate(xy_out[:, 1]):
+        xy_out[i, 0] = spline(y)[0]
+    return xy_out

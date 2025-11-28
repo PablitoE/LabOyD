@@ -2,10 +2,9 @@ import numpy as np
 import matplotlib.pyplot as plt
 import os
 from scipy.ndimage import rotate, gaussian_filter
-from scipy.interpolate import make
 from PIL import Image
 from skimage import measure
-from Varios.images import all_pixels_inside_border
+from Varios.images import all_pixels_inside_border, minimum_point_per_row
 
 
 class FlatInterferogramGenerator():
@@ -100,20 +99,25 @@ class FlatInterferogramGenerator():
             plt.ylabel('Píxeles')
             plt.show()
 
-    def get_maximum_simulated_deviation_px(self, phase):
+    def get_maximum_simulated_deviation_px(self, phase, plot=False):
         phase[np.logical_not(self.aperture_mask)] = 0
         cos_phase = 1 + np.cos(phase)
         contours = measure.find_contours(cos_phase, 0.01)
-        plt.imshow(cos_phase, cmap='jet')
+        if plot:
+            plt.imshow(cos_phase, cmap='jet')
         for contour in contours:
             pixels_inside = all_pixels_inside_border(contour, self.shape)
-
-            plt.plot(contour[:, 1], contour[:, 0], linewidth=2)
-        plt.title('Contornos de interferencia')
-        plt.xlabel('Píxeles')
-        plt.ylabel('Píxeles')
-        plt.colorbar(label='Intensidad')
-        plt.show()
+            minima_curves = minimum_point_per_row(pixels_inside, cos_phase[pixels_inside[:, 0], pixels_inside[:, 1]])
+            if plot:
+                plt.plot(contour[:, 1], contour[:, 0], linewidth=2)
+                plt.plot(minima_curves[:, 1], minima_curves[:, 0], 'r--', linewidth=2)
+        if plot:
+            plt.title('Contornos de interferencia')
+            plt.xlabel('Píxeles')
+            plt.ylabel('Píxeles')
+            plt.colorbar(label='Intensidad')
+            plt.show()
+        return
 
     def generate_flat_interferogram(self, normalized_carrier_frequency=0.1):
         kx = normalized_carrier_frequency
