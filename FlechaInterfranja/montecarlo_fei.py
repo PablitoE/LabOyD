@@ -53,7 +53,8 @@ def worker(sim_id, simulated_deviation_nm, generator=None):
             debugging_info = {
                 "rotation_angle": generator.current_rotation_angle,
                 "carrier_frequency": generator.current_frequency,
-                "maximum_deviation": generator.current_maximum_deviation_nm
+                "maximum_deviation": generator.current_maximum_deviation_nm,
+                "valley_curves": generator.minima_curves
             }
 
         interfringe, arrow = fei.analyze_interference(image_array=interferogram, save=False,

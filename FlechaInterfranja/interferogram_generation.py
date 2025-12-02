@@ -53,6 +53,7 @@ class FlatInterferogramGenerator():
         self.current_frequency = None
         self.current_maximum_deviation_nm = None
         self.current_rotation_angle = None
+        self.minima_curves = None
 
     @property
     def diameter_pixels(self):
@@ -103,14 +104,17 @@ class FlatInterferogramGenerator():
         phase[np.logical_not(self.aperture_mask)] = 0
         cos_phase = 1 + np.cos(phase)
         contours = measure.find_contours(cos_phase, 0.01)
+        self.minima_curves = []
         if plot:
             plt.imshow(cos_phase, cmap='jet')
         for contour in contours:
             pixels_inside = all_pixels_inside_border(contour, self.shape)
-            minima_curves = minimum_point_per_row(pixels_inside, cos_phase[pixels_inside[:, 0], pixels_inside[:, 1]])
+            self.minima_curves.append(
+                minimum_point_per_row(pixels_inside, cos_phase[pixels_inside[:, 0], pixels_inside[:, 1]])
+            )
             if plot:
                 plt.plot(contour[:, 1], contour[:, 0], linewidth=2)
-                plt.plot(minima_curves[:, 1], minima_curves[:, 0], 'r--', linewidth=2)
+                plt.plot(self.minima_curves[-1][:, 1], self.minima_curves[-1][:, 0], 'r--', linewidth=2)
         if plot:
             plt.title('Contornos de interferencia')
             plt.xlabel('Píxeles')
@@ -124,7 +128,7 @@ class FlatInterferogramGenerator():
         ky = 0.0
 
         phase = 2 * np.pi * (kx * self.X + ky * self.Y + self.surface)
-        self.get_maximum_simulated_deviation_px(phase)
+        self.get_maximum_simulated_deviation_px(phase, plot=False)
         interferogram = 1 + self.visibility_ratio * np.cos(phase)
         interferogram *= self.aperture_mask
         interferogram = self.random_rotation(interferogram)
