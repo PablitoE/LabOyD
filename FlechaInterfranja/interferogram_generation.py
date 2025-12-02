@@ -54,6 +54,7 @@ class FlatInterferogramGenerator():
         self.current_maximum_deviation_nm = None
         self.current_rotation_angle = None
         self.minima_curves = None
+        self.current_interferogram = None
 
     @property
     def diameter_pixels(self):
@@ -123,6 +124,15 @@ class FlatInterferogramGenerator():
             plt.show()
         return
 
+    def rotate_simulated_minima_curves(self):
+        c, s = np.cos(np.deg2rad(-self.current_rotation_angle)), np.sin(np.deg2rad(-self.current_rotation_angle))
+        R = np.array([[c, s], [-s, c]])
+        for i, mc in enumerate(self.minima_curves):
+            center = (np.array(self.shape) - 1) / 2
+            mc_centered = mc - center
+            mc_rotated_centered = mc_centered @ R.T
+            self.minima_curves[i] = mc_rotated_centered + center
+
     def generate_flat_interferogram(self, normalized_carrier_frequency=0.1):
         kx = normalized_carrier_frequency
         ky = 0.0
@@ -135,6 +145,9 @@ class FlatInterferogramGenerator():
         interferogram += np.random.normal(0, 1, size=self.shape) * self.noise_level
         interferogram /= np.max(interferogram)
         interferogram_uint8 = np.clip(interferogram * 255, 0, 255).astype(np.uint8)
+
+        self.current_interferogram = interferogram_uint8
+        self.rotate_simulated_minima_curves()
 
         return interferogram_uint8
 
@@ -166,3 +179,17 @@ class FlatInterferogramGenerator():
     def prepare_next_generation(self, mode="random", gaussian_max_deviation=None):
         if mode == "gaussian":
             self.maximum_deviation_nm = gaussian_max_deviation
+
+    def plot_interferogram(self):
+        if self.current_interferogram is None:
+            raise ValueError("There is no generated interferogram to display.")
+        _, axs = plt.subplots(1, 2)
+        axs[0].imshow(self.current_interferogram, cmap='gray')
+        axs[0].set_title('Simulated Interferogram (max_dev = %.2f nm)' % self.current_maximum_deviation_nm)
+        axs[0].set_xlabel('Pixel')
+        axs[0].set_ylabel('Pixel')
+        axs[1].imshow(self.surface * 2 * np.pi * self.aperture_mask, cmap='jet')
+        axs[1].set_title('Simulated Surface (in rads)')
+        for mc in self.minima_curves:
+            axs[0].plot(mc[:, 1], mc[:, 0], 'r--', linewidth=2)
+        plt.show()

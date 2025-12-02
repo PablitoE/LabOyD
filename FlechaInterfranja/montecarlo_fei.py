@@ -45,10 +45,7 @@ def worker(sim_id, simulated_deviation_nm, generator=None):
             debugging_info = None
         else:
             if PLOT_INTERFEROGRAMS:
-                plt.imshow(interferogram, cmap='gray')
-                plt.title('Interferograma simulado (max_dev = %.2f nm)' % generator.current_maximum_deviation_nm)
-                plt.axis('off')
-                plt.show()
+                generator.plot_interferogram()
 
             debugging_info = {
                 "rotation_angle": generator.current_rotation_angle,

@@ -12,6 +12,7 @@ import os
 import re
 import logging
 from Varios.optimizations import encontrar_maximo_cuadratica
+from Varios.lines_points import associate_two_sets_of_lines
 
 
 WAVELENGTH_NM = 633
@@ -478,6 +479,10 @@ def analyze_interference(image_path=None, image_array=None, show=SHOW_ALL,
     # Ajustar franjas con rectas
     slope, intercepts, interfringe_distance = optimize_lines(fringes)
 
+    # Encontrar lineas ideales correspondientes a las franjas
+    if debugging_info is not None and "valley_curves" in debugging_info.keys():
+        fringe_index_in_valley_curves = associate_two_sets_of_lines(debugging_info["valley_curves"], fringes)
+
     # Calcular distancias entre rectas
     """
     intercepts_sorted = np.sort(intercepts)
@@ -534,6 +539,10 @@ def analyze_interference(image_path=None, image_array=None, show=SHOW_ALL,
                  color=colores[i % len(colores)])
         x_fit = slope * fringe[:, 1] + intercepts[i]
         plt.plot(x_fit, fringe[:, 1], color=colores[i % len(colores)], linestyle='--')
+        if debugging_info is not None and "valley_curves" in debugging_info.keys():
+            valley_curve = debugging_info["valley_curves"][fringe_index_in_valley_curves[i]]
+            plt.plot(valley_curve[:, 0], valley_curve[:, 1], color=colores[i % len(colores)],
+                     linestyle=':', linewidth=1.5)
     plt.legend()
     if save:
         output_dir = os.path.join(os.path.dirname(image_path), RESULTS_DIR)
