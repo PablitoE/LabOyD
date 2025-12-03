@@ -335,8 +335,6 @@ def analyze_interference(image_path=None, image_array=None, show=SHOW_ALL,
 
     if debugging_info is not None:
         debugging_info["rotation_angle_estimated"] = angle_rotated
-        if "rotation_angle" in debugging_info.keys():
-            logger.info("Error en la estimación de la rotación: %s °", debugging_info["rotation_angle"] + angle_rotated)
 
     # Mostrar la imagen original y la rotada
     if show:
@@ -481,7 +479,10 @@ def analyze_interference(image_path=None, image_array=None, show=SHOW_ALL,
 
     # Encontrar lineas ideales correspondientes a las franjas
     if debugging_info is not None and "valley_curves" in debugging_info.keys():
-        fringe_index_in_valley_curves = associate_two_sets_of_lines(debugging_info["valley_curves"], fringes)
+        # Valley curves are given as (row, column) but fringes are (x, y)
+        fringe_index_in_valley_curves, distances_fringes_to_valley = associate_two_sets_of_lines(
+            debugging_info["valley_curves"], fringes, flip=True
+        )
 
     # Calcular distancias entre rectas
     """
@@ -502,6 +503,8 @@ def analyze_interference(image_path=None, image_array=None, show=SHOW_ALL,
     )
     max_distance_positive = np.zeros(len(all_distances), dtype=[('index', int), ('value', float)])
     max_distance_negative = np.zeros(len(all_distances), dtype=[('index', int), ('value', float)])
+    if debugging_info is not None and "valley_curves" in debugging_info.keys():
+        rmsd_to_valley_curves = np.zeros(len(all_distances))
     mask_outliers = []
     for i, distances in enumerate(all_distances):
         mask = eliminar_outliers_iqr(
@@ -513,11 +516,16 @@ def analyze_interference(image_path=None, image_array=None, show=SHOW_ALL,
         max_distance_negative[i]['index'] = np.argmin(distances)
         max_distance_positive[i]['value'] = distances[max_distance_positive[i]['index']]
         max_distance_negative[i]['value'] = distances[max_distance_negative[i]['index']]
+        if debugging_info is not None and "valley_curves" in debugging_info.keys():
+            diffs = distances_fringes_to_valley[i][mask]
+            rmsd_to_valley_curves[i] = np.sqrt(np.mean(diffs ** 2))
     total_distances = max_distance_positive['value'] - max_distance_negative['value']
     max_total_distance = np.max(total_distances).astype(float)
     error_max_distance = np.std(total_distances) / np.sqrt(len(total_distances))
     flecha = ufloat(max_total_distance, error_max_distance)
     logging.info("Desviación máxima de la recta: %s (k=1)", flecha)
+    if debugging_info is not None and "valley_curves" in debugging_info.keys():
+        debugging_info["rmsd_to_valley_curves"] = np.mean(rmsd_to_valley_curves)
 
     # Ploteo de los mínimos detectados en la imagen original
     colores = ['r', 'g', 'b']
@@ -541,7 +549,7 @@ def analyze_interference(image_path=None, image_array=None, show=SHOW_ALL,
         plt.plot(x_fit, fringe[:, 1], color=colores[i % len(colores)], linestyle='--')
         if debugging_info is not None and "valley_curves" in debugging_info.keys():
             valley_curve = debugging_info["valley_curves"][fringe_index_in_valley_curves[i]]
-            plt.plot(valley_curve[:, 0], valley_curve[:, 1], color=colores[i % len(colores)],
+            plt.plot(valley_curve[:, 1], valley_curve[:, 0], color=colores[i % len(colores)],
                      linestyle=':', linewidth=1.5)
     plt.legend()
     if save:

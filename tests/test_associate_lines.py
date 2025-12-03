@@ -36,5 +36,5 @@ def test_associate_two_sets_of_lines():
         )
         points_sets_2.append(points)
 
-    min_rmsmd = associate_two_sets_of_lines(points_sets_1, points_sets_2)
+    min_rmsmd, distances = associate_two_sets_of_lines(points_sets_1, points_sets_2)
     assert np.array_equal(true_lines_in_1, min_rmsmd), f"Expected {true_lines_in_1}, but got {min_rmsmd}"
