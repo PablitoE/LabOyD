@@ -53,7 +53,7 @@ def worker(sim_id, simulated_deviation_nm, generator=None):
         arrows.append(arrow)
         interfringes.append(interfringe)
         error_rotation_estimation[k_interferogram] = (
-            generator.current_rotation_angle - debugging_info["rotation_angle_estimated"]
+            generator.current_rotation_angle + debugging_info["rotation_angle_estimated"]
         )
         mean_rms_distance_to_valley[k_interferogram] = debugging_info["rmsd_to_valley_curves"]
     arrows = nominal_values(arrows)
@@ -92,7 +92,7 @@ if __name__ == "__main__":
                   logging.StreamHandler()]
     )
 
-    N_MC_SAMPLES = 200
+    N_MC_SAMPLES = 20
     N_IMS_PER_SAMPLE = 10
     MIN_N_FRINGES = 7
     MAX_N_FRINGES = 20
@@ -166,7 +166,7 @@ if __name__ == "__main__":
             mean_interfringe_rmse = np.sqrt(
                 np.mean((measured_interfringe_spacings - simulated_interfringe_spacings) ** 2, axis=0)
             )
-            fig_interfranja, axs = plt.subplots(1, 3)
+            fig_interfranja, axs = plt.subplots(1, 3, figsize=(16, 6))
             axs[0].plot(range(1, N_IMS_PER_SAMPLE + 1), mean_interfringe_rmse, 'o-')
             axs[1].plot(
                 range(1, N_IMS_PER_SAMPLE + 1), mean_interfringe_rmse / np.mean(simulated_interfringe_spacings, axis=0),
@@ -187,8 +187,8 @@ if __name__ == "__main__":
                 ax.grid(True)
             fig_interfranja.savefig(os.path.join(SAVE_PATH, f"{date}_interfranja_rmse.png"))
 
-            fig_error_rot_valles, axs = plt.subplots(2, 2)
-            axs[0, 0].boxplot(error_rotation_estimation, positions=range(1, N_IMS_PER_SAMPLE + 1))
+            fig_error_rot_valles, axs = plt.subplots(2, 2, figsize=(16, 10))
+            axs[0, 0].boxplot(np.abs(error_rotation_estimation), positions=range(1, N_IMS_PER_SAMPLE + 1))
             axs[0, 0].set_xlabel('Número de interferograma')
             axs[0, 0].set_ylabel('Errores en la estimación de rotación (°)')
             axs[0, 1].plot(

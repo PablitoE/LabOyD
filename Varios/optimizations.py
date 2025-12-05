@@ -11,16 +11,25 @@ def encontrar_maximo_cuadratica(arr_x, arr_y=None):
         arr_y = arr_x
         arr_x = np.arange(len(arr_y))
 
+    if np.all(arr_y == 0):
+        return arr_x[len(arr_x) // 2], 0, 0.0
+
     # Ajustar el polinomio de orden 2
     coeffs = np.polyfit(arr_x, arr_y, 2)
     poly = np.poly1d(coeffs)
+
+    # Encontrar un nivel de incertidumbre en la posición del máximo
+    residuals = arr_y - poly(arr_x)
+    ss_res = np.sum(residuals**2)
+    ss_y = np.linalg.norm(arr_y)**2
+    r_squared = 1 - (ss_res / ss_y)
 
     # Encontrar el máximo del polinomio
     a, b, c = coeffs
     max_x = -b / (2 * a)
     max_y = poly(max_x)
 
-    return max_x, max_y
+    return max_x, max_y, r_squared
 
 
 def spline_zeros(rc, z):

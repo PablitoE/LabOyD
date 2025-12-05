@@ -93,7 +93,7 @@ def rotate_image_to_max_frequency(img_array, ignore_low_freq_pixels=2, precision
         rotated_img = rotate(img_array, angle, mode='nearest', reshape=False)
         cumulative_intensity = np.sum(rotated_img, axis=0)
         variations_cum[ka] = np.var(cumulative_intensity[Nc // 2 - limit:Nc // 2 + limit])
-    angle, _ = encontrar_maximo_cuadratica(possible_angles, variations_cum)
+    angle, _, _ = encontrar_maximo_cuadratica(possible_angles, variations_cum)
     if angle < possible_angles[0] or angle > possible_angles[-1]:
         angle = possible_angles[np.argmax(variations_cum)]
 
@@ -120,7 +120,7 @@ def enmascarar_imagen(img, center_x, center_y, radius):
         raise ValueError("El tipo de la imagen debe ser uint8 o float32.")
 
 
-def search_points_in_valley(img, x, y, step=1, aperture=1, discard_last_points=0):
+def search_points_in_valley(img, x, y, step=1, aperture=1, discard_last_points=0, r_squared_threshold=0.999):
     edge_value = img[0, 0]
     array_aperture = np.arange(-aperture, aperture + 1)
     x_prev, y_prev = x, y
@@ -130,9 +130,33 @@ def search_points_in_valley(img, x, y, step=1, aperture=1, discard_last_points=0
         inspect_values = img[new_min_y, x_prev + array_aperture]
         if np.any(inspect_values == edge_value):
             break
-        new_min_x = np.argmin(inspect_values) + x_prev - aperture
-        new_points.append((new_min_x, new_min_y))
-        x_prev, y_prev = new_min_x, new_min_y
+
+        new_min_x, value_y, r_squared = encontrar_maximo_cuadratica(x_prev + array_aperture, inspect_values)
+        condition = (
+            not np.isnan(new_min_x)
+            and r_squared > r_squared_threshold
+            and (x_prev - aperture <= new_min_x <= x_prev + aperture)
+        )
+        if condition:
+            new_points.append((new_min_x, new_min_y))
+
+        """
+        # Debugging
+        just_min_in_inspect = np.argmin(inspect_values)
+        just_min = just_min_in_inspect + x_prev - aperture
+        plt.plot(x_prev + array_aperture, inspect_values)
+        plt.plot(just_min, inspect_values[just_min_in_inspect], 'ro', label='Mínimo simple')
+        plt.plot(new_min_x, value_y, 'go', label='Mínimo cuadrático. R²={:.3f}'.format(r_squared))
+        plt.legend(loc='upper right')
+        plt.show(block=False)
+        plt.pause(0.25) if condition else plt.pause(1)
+        plt.cla()
+        """
+
+        if condition:
+            x_prev = int(np.round(new_min_x))
+        y_prev = new_min_y
+
     new_points = np.array(new_points)
     if new_points.shape[0] > discard_last_points:
         new_points = new_points[:-discard_last_points]
