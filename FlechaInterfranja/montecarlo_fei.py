@@ -37,6 +37,7 @@ def worker(sim_id, simulated_deviation_nm, generator=None):
     arrows = []
     interfringes = []
     error_rotation_estimation = np.zeros(N_IMS_PER_SAMPLE)
+    error_rotation_estimation_corrected = np.zeros(N_IMS_PER_SAMPLE)
     mean_rms_distance_to_valley = np.zeros(N_IMS_PER_SAMPLE)
     generator.prepare_next_generation(mode=SIMULATION_MODE, gaussian_max_deviation=simulated_deviation_nm)
     for k_interferogram, interferogram in enumerate(generator.generate(
@@ -54,6 +55,9 @@ def worker(sim_id, simulated_deviation_nm, generator=None):
         interfringes.append(interfringe)
         error_rotation_estimation[k_interferogram] = (
             generator.current_rotation_angle + debugging_info["rotation_angle_estimated"]
+        )
+        error_rotation_estimation_corrected[k_interferogram] = (
+            generator.current_rotation_angle + debugging_info["rotation_angle_estimated_corrected"]
         )
         mean_rms_distance_to_valley[k_interferogram] = debugging_info["rmsd_to_valley_curves"]
     arrows = nominal_values(arrows)
@@ -75,7 +79,7 @@ def worker(sim_id, simulated_deviation_nm, generator=None):
     return (
         simulated_interfringe_spacings, measured_interfringe_spacings,
         simulated_deviation_nm, measured_max_deviation,
-        error_rotation_estimation,
+        error_rotation_estimation, error_rotation_estimation_corrected,
         mean_rms_distance_to_valley,
     )
 
@@ -126,6 +130,7 @@ if __name__ == "__main__":
         measured_interfringe_spacings = np.zeros((N_MC_SAMPLES, N_IMS_PER_SAMPLE))
         simulated_interfringe_spacings = np.zeros((N_MC_SAMPLES, N_IMS_PER_SAMPLE))
         error_rotation_estimation = np.zeros((N_MC_SAMPLES, N_IMS_PER_SAMPLE))
+        error_rotation_estimation_corrected = np.zeros((N_MC_SAMPLES, N_IMS_PER_SAMPLE))
         mean_rms_distance_to_valley = np.zeros((N_MC_SAMPLES, N_IMS_PER_SAMPLE))
 
         if MULTIPROCESSING:
@@ -140,7 +145,8 @@ if __name__ == "__main__":
                 (
                     simulated_interfringe_spacings[i, :], measured_interfringe_spacings[i, :],
                     simulated_deviation_nm[i], measured_max_deviations[i],
-                    error_rotation_estimation[i, :], mean_rms_distance_to_valley[i, :],
+                    error_rotation_estimation[i, :], error_rotation_estimation_corrected[i, :],
+                    mean_rms_distance_to_valley[i, :],
                 ) = results[i]
         else:
             generator = FlatInterferogramGenerator(shape=(1024, 1024),
@@ -159,7 +165,8 @@ if __name__ == "__main__":
                 (
                     simulated_interfringe_spacings[i, :], measured_interfringe_spacings[i, :],
                     simulated_deviation_nm[i], measured_max_deviations[i],
-                    error_rotation_estimation[i, :], mean_rms_distance_to_valley[i, :],
+                    error_rotation_estimation[i, :], error_rotation_estimation_corrected[i, :],
+                    mean_rms_distance_to_valley[i, :],
                 ) = worker(i, simulated_deviation_nm[i], generator=generator)
 
         if PLOT_RESULTS:
@@ -188,14 +195,20 @@ if __name__ == "__main__":
             fig_interfranja.savefig(os.path.join(SAVE_PATH, f"{date}_interfranja_rmse.png"))
 
             fig_error_rot_valles, axs = plt.subplots(2, 2, figsize=(16, 10))
-            axs[0, 0].boxplot(np.abs(error_rotation_estimation), positions=range(1, N_IMS_PER_SAMPLE + 1))
+            axs[0, 0].boxplot(np.abs(error_rotation_estimation_corrected), positions=range(1, N_IMS_PER_SAMPLE + 1))
             axs[0, 0].set_xlabel('Número de interferograma')
             axs[0, 0].set_ylabel('Errores en la estimación de rotación (°)')
             axs[0, 1].plot(
                 simulated_deviation_nm,
                 np.sqrt(np.mean(error_rotation_estimation ** 2, axis=1)),
-                'o',
+                'o', label="Rotation by contrast on averaged columns"
             )
+            axs[0, 1].plot(
+                simulated_deviation_nm,
+                np.sqrt(np.mean(error_rotation_estimation_corrected ** 2, axis=1)),
+                'o', label="Corrected rotation by optimizing fringe location"
+            )
+            axs[0, 1].legend()
             axs[0, 1].set_xlabel('Desviación máxima simulada (nm)')
             axs[0, 1].set_ylabel('RMSE de la estimación de rotación (°)')
 

@@ -1,16 +1,18 @@
 import numpy as np
 import cv2
 import matplotlib.pyplot as plt
+import pickle
 from scipy.signal import find_peaks
 from scipy.optimize import minimize, curve_fit
 from scipy.stats import linregress
 from scipy import fftpack
 from scipy.ndimage import rotate
 from uncertainties import ufloat
-from uncertainties.unumpy import nominal_values
+from uncertainties.unumpy import nominal_values, sqrt
 import os
 import re
 import logging
+from datetime import datetime
 from Varios.optimizations import encontrar_maximo_cuadratica
 from Varios.lines_points import associate_two_sets_of_lines
 
@@ -25,13 +27,16 @@ GAUSSIAN_BLUR_KERNEL_SIZE = 17
 GAUSSIAN_BLUR_SIGMA_CIRCLE = 16
 GAUSSIAN_BLUR_KERNEL_SIZE_CIRCLE = 51
 ROTATION_IGNORE_LOW_FREQ_PIXELS = 3
+ROTATION_RANGE_ANGLE_DEG = 7
+ROTATION_N_RANGE_ANGLE = 15
 HOUGH_PARAM1 = 5
 HOUGH_PARAM2 = 5
 FRACTION_OF_SEPARATION_TO_SEARCH_FRINGES = 0.8
 MINIMUM_DISTANCE_FROM_EDGES = 70
 DISCARD_EDGE_POINTS = 2
 FIND_FRINGES_STEP = 25       # px
-FIND_FRINGES_APERTURE_IN_SEARCH = 0.3
+FIND_FRINGES_APERTURE_IN_SEARCH = 0.4
+MAX_NUMBER_POINTS_FIT = 7
 REQUIRED_IMS = 10
 RESULTS_DIR = "results"
 IQR_FACTOR_IMS = 1.0
@@ -54,7 +59,9 @@ def scaledLinearOp_To_array(scaledLinearOp):
     return scaledLinearOp.matmat(identity)
 
 
-def rotate_image_to_max_frequency(img_array, ignore_low_freq_pixels=2, precision=3):
+def rotate_image_to_max_frequency(
+    img_array, ignore_low_freq_pixels=2, precision=3, range_angle_deg=4, n_range_angle=11
+):
     Nr, Nc = img_array.shape
     Nr_ = Nr * precision
     Nc_ = Nc * precision
@@ -75,8 +82,6 @@ def rotate_image_to_max_frequency(img_array, ignore_low_freq_pixels=2, precision
     angle = np.rad2deg(np.arctan2(max_freq_idx[0], max_freq_idx[1]))
 
     # Proponer varios ángulos posibles
-    range_angle_deg = 4
-    n_range_angle = 11
     variations_cum = np.zeros(n_range_angle)
     possible_angles = np.linspace(angle - range_angle_deg, angle + range_angle_deg,
                                   n_range_angle)
@@ -93,6 +98,10 @@ def rotate_image_to_max_frequency(img_array, ignore_low_freq_pixels=2, precision
         rotated_img = rotate(img_array, angle, mode='nearest', reshape=False)
         cumulative_intensity = np.sum(rotated_img, axis=0)
         variations_cum[ka] = np.var(cumulative_intensity[Nc // 2 - limit:Nc // 2 + limit])
+
+    plt.plot(possible_angles, variations_cum)
+    plt.show()
+
     angle, _, _ = encontrar_maximo_cuadratica(possible_angles, variations_cum)
     if angle < possible_angles[0] or angle > possible_angles[-1]:
         angle = possible_angles[np.argmax(variations_cum)]
@@ -125,13 +134,17 @@ def search_points_in_valley(img, x, y, step=1, aperture=1, discard_last_points=0
     array_aperture = np.arange(-aperture, aperture + 1)
     x_prev, y_prev = x, y
     new_points = []
+    clean = True
+    # save_for_debug_detected = False
     while True:
         new_min_y = y_prev - step
         inspect_values = img[new_min_y, x_prev + array_aperture]
         if np.any(inspect_values == edge_value):
             break
 
-        new_min_x, value_y, r_squared = encontrar_maximo_cuadratica(x_prev + array_aperture, inspect_values)
+        new_min_x, value_y, r_squared = encontrar_maximo_cuadratica(
+            x_prev + array_aperture, inspect_values, extreme="min", max_number_points=MAX_NUMBER_POINTS_FIT
+        )
         condition = (
             not np.isnan(new_min_x)
             and r_squared > r_squared_threshold
@@ -139,18 +152,36 @@ def search_points_in_valley(img, x, y, step=1, aperture=1, discard_last_points=0
         )
         if condition:
             new_points.append((new_min_x, new_min_y))
+            if not clean:
+                clean = True
+                """
+                # Debugging
+                save_for_debug_detected = True
+                with open("debug_interrupted_fringe_search.pkl", "wb") as f:
+                    data_to_save = {
+                        "img": img, "x": x, "y": y, "step": step, "aperture": aperture,
+                        "discard_last_points": discard_last_points, "r_squared_threshold": r_squared_threshold
+                    }
+                    pickle.dump(data_to_save, f)
+                # quit()
+                """
+        else:
+            clean = False
 
         """
         # Debugging
-        just_min_in_inspect = np.argmin(inspect_values)
-        just_min = just_min_in_inspect + x_prev - aperture
-        plt.plot(x_prev + array_aperture, inspect_values)
-        plt.plot(just_min, inspect_values[just_min_in_inspect], 'ro', label='Mínimo simple')
-        plt.plot(new_min_x, value_y, 'go', label='Mínimo cuadrático. R²={:.3f}'.format(r_squared))
-        plt.legend(loc='upper right')
-        plt.show(block=False)
-        plt.pause(0.25) if condition else plt.pause(1)
-        plt.cla()
+        if save_for_debug_detected:
+            just_min_in_inspect = np.argmin(inspect_values)
+            just_min = just_min_in_inspect + x_prev - aperture
+            plt.plot(x_prev + array_aperture, inspect_values)
+            plt.plot(just_min, inspect_values[just_min_in_inspect], 'ro', label='Mínimo simple')
+            plt.plot(new_min_x, value_y, 'go', label='Mínimo cuadrático. R²={:.3f}'.format(r_squared))
+            plt.legend(loc='upper right')
+            # plt.show(block=False)
+            # plt.pause(0.25) if condition else plt.pause(1)
+            # plt.cla()
+            plt.show()
+            quit()
         """
 
         if condition:
@@ -190,31 +221,51 @@ def optimize_lines(fringes):
     "Como las rectas son normalmente verticales, conviene usar un modelo: x = my + b"
     def mse(parameters, fringes):
         slope = parameters[0]
-        interfringe = parameters[1]
+        interfringe_y = parameters[1]
         first_intercept = parameters[2]
         n_fringes = len(fringes)
-        intercepts = first_intercept + np.arange(n_fringes) * interfringe
+        intercepts = first_intercept + np.arange(n_fringes) * interfringe_y
         total_se = 0
         all_distances = distances_sets_of_points_to_lines(fringes, slope, intercepts)
         for distances in all_distances:
             total_se += np.sum(distances ** 2)
-        return total_se
+        total_points = np.sum([len(fringe) for fringe in fringes])
+        return total_se / total_points
 
     initial_guess = np.zeros(3)
     bounds = [(None, None), (0, 10000), (0, 10000)]
     result = minimize(mse, initial_guess, args=fringes, method='L-BFGS-B', bounds=bounds)
 
     slope = result.x[0]
-    interfringe = result.x[1]
+    interfringe_y = result.x[1]
     first_intercept = result.x[2]
     n_fringes = len(fringes)
-    intercepts = first_intercept + np.arange(n_fringes) * interfringe
+    intercepts = first_intercept + np.arange(n_fringes) * interfringe_y
+
+    """
+    # Debugging plot
+    if result.fun > 10:
+        plt.cla()
+        colors = plt.cm.rainbow(np.linspace(0, 1, len(fringes)))
+        for i_f, f in enumerate(fringes):
+            plt.plot(f[:, 1], f[:, 0], 'o', color=colors[i_f])
+            x_min = np.min(f[:, 1])
+            x_max = np.max(f[:, 1])
+            plt.plot(
+                [x_min, x_max], [intercepts[i_f] + slope * x_min, intercepts[i_f] + slope * x_max], color=colors[i_f]
+            )
+        plt.title('Ajuste de lineas a franjas detectadas. R²={:.3f}'.format(result.fun))
+        plt.show(block=False)
+        plt.pause(0.2)
+    """
 
     total_points = np.sum([len(fringe) for fringe in fringes])
     rms = result.hess_inv * result.fun / (total_points - len(result.x))
     if not isinstance(rms, np.ndarray):
         rms = scaledLinearOp_To_array(rms)
-    interfringe = ufloat(interfringe, np.sqrt(rms[1, 1]))
+    interfringe_y = ufloat(interfringe_y, np.sqrt(rms[1, 1]))
+    slope_u = ufloat(slope, np.sqrt(rms[0, 0]))
+    interfringe = 1 / sqrt(1 + slope_u**2) * interfringe_y
     return slope, intercepts, interfringe
 
 
@@ -344,6 +395,7 @@ def analyze_interference(image_path=None, image_array=None, show=SHOW_ALL,
                          show_result=SHOW_EACH_RESULT, save=SAVE_RESULTS,
                          debugging_info=None):
     assert image_path is not None or image_array is not None
+    date = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
     if image_array is None:
         # Cargar la imagen en escala de grises
@@ -355,8 +407,18 @@ def analyze_interference(image_path=None, image_array=None, show=SHOW_ALL,
 
     # Rotar la imagen para dejar las franjas más o menos verticales
     img_rotada, angle_rotated = rotate_image_to_max_frequency(img,
-                                                              ignore_low_freq_pixels=ROTATION_IGNORE_LOW_FREQ_PIXELS)
-
+                                                              ignore_low_freq_pixels=ROTATION_IGNORE_LOW_FREQ_PIXELS,
+                                                              range_angle_deg=ROTATION_RANGE_ANGLE_DEG,
+                                                              n_range_angle=ROTATION_N_RANGE_ANGLE)
+    if np.all(img_rotada == 0):
+        print("Todo cero!")
+        with open(f"{date}_debug_failed_rotation.pkl", "wb") as f:
+            data_to_save = {
+                "img": img,
+                "ignore_low_freq_pixels": ROTATION_IGNORE_LOW_FREQ_PIXELS
+            }
+            pickle.dump(data_to_save, f)
+        raise ValueError("La imagen rotada quedó toda en cero.")
     if debugging_info is not None:
         debugging_info["rotation_angle_estimated"] = angle_rotated
 
@@ -418,6 +480,12 @@ def analyze_interference(image_path=None, image_array=None, show=SHOW_ALL,
             plt.imshow(output, cmap='gray')
             plt.show()
     else:
+        with open(f"{date}_debug_no_circles_found.pkl", "wb") as f:
+            data_to_save = {
+                "image": blurred, "method": cv2.HOUGH_GRADIENT, "dp": 1.8, "minDist": 400, "param1": HOUGH_PARAM1,
+                "param2": HOUGH_PARAM2, "minRadius": 400, "maxRadius": 0
+            }
+            pickle.dump(data_to_save, f)
         raise ValueError("No se detectó ningún círculo en la imagen.")
 
     # Descartar franjas cercanas al borde del círculo
@@ -500,6 +568,11 @@ def analyze_interference(image_path=None, image_array=None, show=SHOW_ALL,
 
     # Ajustar franjas con rectas
     slope, intercepts, interfringe_distance = optimize_lines(fringes)
+
+    # Actualizar valor de rotación estimada
+    angle_rotated = angle_rotated - np.rad2deg(np.arctan(slope))
+    if debugging_info is not None:
+        debugging_info["rotation_angle_estimated_corrected"] = angle_rotated
 
     # Encontrar lineas ideales correspondientes a las franjas
     if debugging_info is not None and "valley_curves" in debugging_info.keys():
