@@ -5,6 +5,7 @@ from scipy.ndimage import rotate, gaussian_filter
 from PIL import Image
 from skimage import measure
 from Varios.images import all_pixels_inside_border, minimum_point_per_row
+from Varios.lines_points import rotate_2d_points
 
 
 class FlatInterferogramGenerator():
@@ -125,13 +126,7 @@ class FlatInterferogramGenerator():
         return
 
     def rotate_simulated_minima_curves(self):
-        c, s = np.cos(np.deg2rad(-self.current_rotation_angle)), np.sin(np.deg2rad(-self.current_rotation_angle))
-        R = np.array([[c, s], [-s, c]])
-        for i, mc in enumerate(self.minima_curves):
-            center = (np.array(self.shape) - 1) / 2
-            mc_centered = mc - center
-            mc_rotated_centered = mc_centered @ R.T
-            self.minima_curves[i] = mc_rotated_centered + center
+        self.minima_curves = rotate_2d_points(self.minima_curves, -self.current_rotation_angle, self.shape)
 
     def generate_flat_interferogram(self, normalized_carrier_frequency=0.1):
         kx = normalized_carrier_frequency

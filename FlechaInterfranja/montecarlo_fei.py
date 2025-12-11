@@ -96,7 +96,7 @@ if __name__ == "__main__":
                   logging.StreamHandler()]
     )
 
-    N_MC_SAMPLES = 20
+    N_MC_SAMPLES = 200
     N_IMS_PER_SAMPLE = 10
     MIN_N_FRINGES = 7
     MAX_N_FRINGES = 20

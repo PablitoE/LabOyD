@@ -34,17 +34,19 @@ def encontrar_maximo_cuadratica(arr_x, arr_y=None, max_number_points=7, extreme=
         return arr_x[len(arr_x) // 2], 0, 0.0
 
     # Limitar el número de puntos para el ajuste
+    if extreme == "max":
+        extreme_index = np.argmax(arr_y)
+    elif extreme == "min":
+        extreme_index = np.argmin(arr_y)
+    else:
+        max_index = np.argmax(arr_y)
+        d_max_from_center = abs(max_index - len(arr_x) // 2)
+        min_index = np.argmin(arr_y)
+        d_min_from_center = abs(min_index - len(arr_x) // 2)
+        extreme_index = max_index if d_max_from_center < d_min_from_center else min_index
+    extreme_value_by_index = arr_y[extreme_index]
     if len(arr_x) > max_number_points:
-        if extreme == "max":
-            center_index = np.argmax(arr_y)
-        elif extreme == "min":
-            center_index = np.argmin(arr_y)
-        else:
-            max_index = np.argmax(arr_y)
-            d_max_from_center = abs(max_index - len(arr_x) // 2)
-            min_index = np.argmin(arr_y)
-            d_min_from_center = abs(min_index - len(arr_x) // 2)
-            center_index = max_index if d_max_from_center < d_min_from_center else min_index
+        center_index = extreme_index
         half_window = max_number_points // 2
         if center_index - half_window < 0:
             center_index = half_window
@@ -55,6 +57,9 @@ def encontrar_maximo_cuadratica(arr_x, arr_y=None, max_number_points=7, extreme=
         arr_x = arr_x[start_index:end_index]
         arr_y = arr_y[start_index:end_index]
 
+    if np.all(arr_y == 0):
+        return arr_x[len(arr_x) // 2], 0, 0.0
+
     # Ajustar el polinomio de orden 2
     coeffs = np.polyfit(arr_x, arr_y, 2)
     poly = np.poly1d(coeffs)
@@ -64,6 +69,8 @@ def encontrar_maximo_cuadratica(arr_x, arr_y=None, max_number_points=7, extreme=
     ss_res = np.sum(residuals**2)
     ss_y = np.linalg.norm(arr_y)**2
     r_squared = 1 - (ss_res / ss_y)
+    if not np.isfinite(r_squared):
+        r_squared = 0.0
 
     # Encontrar el extremo del polinomio
     a, b, c = coeffs
@@ -72,9 +79,9 @@ def encontrar_maximo_cuadratica(arr_x, arr_y=None, max_number_points=7, extreme=
 
     # Determinar si es un máximo o mínimo
     if extreme == "max" and a >= 0:
-        return center_index, arr_y[center_index], 0.0
+        return extreme_index, extreme_value_by_index, 0.0
     if extreme == "min" and a <= 0:
-        return center_index, arr_y[center_index], 0.0
+        return extreme_index, extreme_value_by_index, 0.0
 
     return extr_x, extr_y, r_squared
 

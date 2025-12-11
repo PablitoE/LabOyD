@@ -30,3 +30,16 @@ def associate_two_sets_of_lines(lines1, lines2, flip=False):
     min_rmsmd = np.argmin(rmsmd_matrix, axis=0)
 
     return min_rmsmd, distance_2_in_line1
+
+
+def rotate_2d_points(list_points, angle_deg, shape):
+    angle_rad = np.deg2rad(angle_deg)
+    output_list = []
+    c, s = np.cos(angle_rad), np.sin(angle_rad)
+    R = np.array([[c, s], [-s, c]])
+    for i, mc in enumerate(list_points):
+        center = (np.asarray(shape) - 1) / 2
+        mc_centered = mc - center
+        mc_rotated_centered = mc_centered @ R.T
+        output_list.append(mc_rotated_centered + center)
+    return output_list

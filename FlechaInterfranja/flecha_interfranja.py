@@ -14,7 +14,7 @@ import re
 import logging
 from datetime import datetime
 from Varios.optimizations import encontrar_maximo_cuadratica
-from Varios.lines_points import associate_two_sets_of_lines
+from Varios.lines_points import associate_two_sets_of_lines, rotate_2d_points
 
 
 WAVELENGTH_NM = 633
@@ -40,7 +40,7 @@ MAX_NUMBER_POINTS_FIT = 7
 REQUIRED_IMS = 10
 RESULTS_DIR = "results"
 IQR_FACTOR_IMS = 1.0
-IQR_FACTOR_POINTS_IN_FRINGES = 1.5
+IQR_FACTOR_POINTS_IN_FRINGES = 2.0
 
 SHOW_ALL = False
 SHOW_EACH_RESULT = False
@@ -98,9 +98,6 @@ def rotate_image_to_max_frequency(
         rotated_img = rotate(img_array, angle, mode='nearest', reshape=False)
         cumulative_intensity = np.sum(rotated_img, axis=0)
         variations_cum[ka] = np.var(cumulative_intensity[Nc // 2 - limit:Nc // 2 + limit])
-
-    plt.plot(possible_angles, variations_cum)
-    plt.show()
 
     angle, _, _ = encontrar_maximo_cuadratica(possible_angles, variations_cum)
     if angle < possible_angles[0] or angle > possible_angles[-1]:
@@ -566,6 +563,15 @@ def analyze_interference(image_path=None, image_array=None, show=SHOW_ALL,
         # Unir los puntos de arriba y abajo en una sola franja
         fringes[i] = np.concatenate((upper_points[::-1], [(x, y)], lower_points))
 
+    # Encontrar lineas ideales correspondientes a las franjas
+    rotated_valley_curves = None
+    if debugging_info is not None and "valley_curves" in debugging_info.keys():
+        rotated_valley_curves = rotate_2d_points(debugging_info["valley_curves"], -angle_rotated, shape=img.shape)
+        # Valley curves are given as (row, column) but fringes are (x, y)
+        fringe_index_in_valley_curves, distances_fringes_to_valley = associate_two_sets_of_lines(
+            rotated_valley_curves, fringes, flip=True
+        )
+
     # Ajustar franjas con rectas
     slope, intercepts, interfringe_distance = optimize_lines(fringes)
 
@@ -573,24 +579,6 @@ def analyze_interference(image_path=None, image_array=None, show=SHOW_ALL,
     angle_rotated = angle_rotated - np.rad2deg(np.arctan(slope))
     if debugging_info is not None:
         debugging_info["rotation_angle_estimated_corrected"] = angle_rotated
-
-    # Encontrar lineas ideales correspondientes a las franjas
-    if debugging_info is not None and "valley_curves" in debugging_info.keys():
-        # Valley curves are given as (row, column) but fringes are (x, y)
-        fringe_index_in_valley_curves, distances_fringes_to_valley = associate_two_sets_of_lines(
-            debugging_info["valley_curves"], fringes, flip=True
-        )
-
-    # Calcular distancias entre rectas
-    """
-    intercepts_sorted = np.sort(intercepts)
-    slope_proportion = np.sqrt(1 + slope ** 2)
-    distances = np.abs(np.diff(intercepts_sorted)) / slope_proportion
-    mean_distance = np.mean(distances)
-    std_distance = np.std(distances)
-    error_mean_distance = std_distance / np.sqrt(len(distances))
-    interfringe_distance = ufloat(mean_distance, error_mean_distance)
-    """
 
     logging.info("Distancias media entre rectas: %s (k=1)", interfringe_distance)
 
@@ -616,6 +604,8 @@ def analyze_interference(image_path=None, image_array=None, show=SHOW_ALL,
         if debugging_info is not None and "valley_curves" in debugging_info.keys():
             diffs = distances_fringes_to_valley[i][mask]
             rmsd_to_valley_curves[i] = np.sqrt(np.mean(diffs ** 2))
+            # if rmsd_to_valley_curves[i] > 5:
+            #     show_result = True  # Forzar ploteo si RMSD es muy alto
     total_distances = max_distance_positive['value'] - max_distance_negative['value']
     max_total_distance = np.max(total_distances).astype(float)
     error_max_distance = np.std(total_distances) / np.sqrt(len(total_distances))
@@ -645,7 +635,7 @@ def analyze_interference(image_path=None, image_array=None, show=SHOW_ALL,
         x_fit = slope * fringe[:, 1] + intercepts[i]
         plt.plot(x_fit, fringe[:, 1], color=colores[i % len(colores)], linestyle='--')
         if debugging_info is not None and "valley_curves" in debugging_info.keys():
-            valley_curve = debugging_info["valley_curves"][fringe_index_in_valley_curves[i]]
+            valley_curve = rotated_valley_curves[fringe_index_in_valley_curves[i]]
             plt.plot(valley_curve[:, 1], valley_curve[:, 0], color=colores[i % len(colores)],
                      linestyle=':', linewidth=1.5)
     plt.legend()
