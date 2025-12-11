@@ -250,5 +250,5 @@ if __name__ == "__main__":
         plt.ylabel('Desviación máxima medida (nm)')
         plt.grid(True)
         plt.legend()
-        plt.savefig(os.path.join(SAVE_PATH, "scatter_desviaciones_maximas.png"))
+        plt.savefig(os.path.join(SAVE_PATH, f"{date}_scatter_desviaciones_maximas.png"))
         plt.show()
