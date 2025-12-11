@@ -82,7 +82,7 @@ class FlatInterferogramGenerator():
 
         return rotate(interferogram, self.current_rotation_angle, reshape=False, order=3, mode='nearest')
 
-    def simulate_surface(self, plot_surface=False, mode="random"):
+    def simulate_surface(self, no_tilt=True, plot_surface=False, mode="random", choice_ratio_fit_tilt=0.1):
         if mode == "random":
             surface = np.random.normal(0, 1, size=self.shape)
             surface = gaussian_filter(surface, sigma=np.sqrt(self.size) / 8)
@@ -90,6 +90,21 @@ class FlatInterferogramGenerator():
             sigma = self.diameter_pixels / 3
             surface = np.exp(-(self.r**2) / (2 * sigma**2))
             surface = surface - np.mean(surface)
+
+        if no_tilt:
+            num_pixels_to_keep = int(np.sum(self.aperture_mask) * choice_ratio_fit_tilt)
+            indices_in_mask = np.argwhere(self.aperture_mask)
+            indices_to_keep = np.random.choice(len(indices_in_mask), num_pixels_to_keep, replace=False)
+            indices_to_keep = indices_in_mask[indices_to_keep]
+
+            Y_indices = np.arange(self.shape[0])[:, np.newaxis]
+            X_indices = np.arange(self.shape[1])[np.newaxis, :]
+            A = np.c_[indices_to_keep[:, 1], indices_to_keep[:, 0], np.ones(num_pixels_to_keep)]
+            b = surface[indices_to_keep[:, 0], indices_to_keep[:, 1]]
+            coeffs, _, _, _ = np.linalg.lstsq(A, b, rcond=None)
+            plane = (coeffs[0] * X_indices + coeffs[1] * Y_indices + coeffs[2])
+            surface = surface - plane
+
         surface *= self.aperture_mask
         surface = surface / (np.max(np.abs(surface)) - np.min(np.abs(surface)))
         self.surface = surface * self.current_maximum_deviation_nm / self.wavelength_nm * 2
