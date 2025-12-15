@@ -9,7 +9,7 @@ from multiprocessing import Pool
 from interferogram_generation import FlatInterferogramGenerator
 from tqdm import tqdm
 from Varios.plot import boxplot_by_bins
-import pickle
+# import pickle     # For debugging
 
 
 BASE_SEED = 50
@@ -56,6 +56,7 @@ def worker(sim_id, simulated_deviation_nm, generator=None):
         interfringe, arrow = fei.analyze_interference(image_array=interferogram, save=False,
                                                       show_result=PLOT_FRINGE_DETECTION,
                                                       debugging_info=debugging_info)
+        """
         interfringe_error = interfringe.n - 1 / generator.current_frequency
         if abs(interfringe_error) > 3:
             with open("debug_failed_interfringe.pkl", "wb") as f:
@@ -67,6 +68,7 @@ def worker(sim_id, simulated_deviation_nm, generator=None):
                 quit()
         else:
             logging.critical("Interfringe error: %f", interfringe_error)
+        """
 
         arrows.append(arrow)
         interfringes.append(interfringe)
