@@ -105,7 +105,7 @@ if __name__ == "__main__":
     MAX_N_FRINGES = 20
     MAX_ROTATION_DEG = 5
     VISIBILITY_RATIO = 0.5
-    NOISE_LEVEL = 0.001
+    NOISE_LEVEL = 0.001             # Relative to visibility ratio
     WAVELENGTH_NM = 632.8
     MAX_DEVIATION_NM = 150.0
     PLOT_INTERFEROGRAMS = False

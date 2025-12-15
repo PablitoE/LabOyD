@@ -152,7 +152,7 @@ class FlatInterferogramGenerator():
         interferogram = 1 + self.visibility_ratio * np.cos(phase)
         interferogram *= self.aperture_mask
         interferogram = self.random_rotation(interferogram)
-        interferogram += np.random.normal(0, 1, size=self.shape) * self.noise_level
+        interferogram += np.random.normal(0, 1, size=self.shape) * self.noise_level * self.visibility_ratio
         interferogram /= np.max(interferogram)
         interferogram_uint8 = np.clip(interferogram * 255, 0, 255).astype(np.uint8)
 
