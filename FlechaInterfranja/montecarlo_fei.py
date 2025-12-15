@@ -9,6 +9,7 @@ from multiprocessing import Pool
 from interferogram_generation import FlatInterferogramGenerator
 from tqdm import tqdm
 from Varios.plot import boxplot_by_bins
+# import pickle     # For debugging
 
 
 BASE_SEED = 50
@@ -47,13 +48,28 @@ def worker(sim_id, simulated_deviation_nm, generator=None):
         surface_options={"plot_surface": PLOT_SURFACES}
     )):
         simulated_rotation_angle[k_interferogram] = generator.current_rotation_angle
-        debugging_info = {"valley_curves": generator.minima_curves}
+        debugging_info = {"valley_curves": generator.minima_curves,
+                          "simulated_interfringe_spacing": 1 / generator.current_frequency}
         if not MULTIPROCESSING and PLOT_INTERFEROGRAMS:
             generator.plot_interferogram()
 
         interfringe, arrow = fei.analyze_interference(image_array=interferogram, save=False,
                                                       show_result=PLOT_FRINGE_DETECTION,
                                                       debugging_info=debugging_info)
+        """
+        interfringe_error = interfringe.n - 1 / generator.current_frequency
+        if abs(interfringe_error) > 3:
+            with open("debug_failed_interfringe.pkl", "wb") as f:
+                data_to_save = {
+                    "interferogram": interferogram,
+                    "debugging_info": debugging_info
+                }
+                pickle.dump(data_to_save, f)
+                quit()
+        else:
+            logging.critical("Interfringe error: %f", interfringe_error)
+        """
+
         arrows.append(arrow)
         interfringes.append(interfringe)
         error_rotation_estimation[k_interferogram] = (
@@ -88,7 +104,7 @@ def worker(sim_id, simulated_deviation_nm, generator=None):
 
 
 if __name__ == "__main__":
-    MULTIPROCESSING = True
+    MULTIPROCESSING = False
     SAVE_PATH = "Data/Resultados/MonteCarloFEI"
     LOAD_FILENAME = ""
     logging.basicConfig(

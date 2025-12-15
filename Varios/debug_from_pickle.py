@@ -1,12 +1,13 @@
 import pickle
 import numpy as np
 import matplotlib.pyplot as plt
-from FlechaInterfranja.flecha_interfranja import search_points_in_valley
+from FlechaInterfranja.flecha_interfranja import search_points_in_valley, analyze_interference
 
 
 debug_fringe_search = False
 debug_circle_detection = False
-debug_failed_rotation = True
+debug_failed_rotation = False
+debug_failed_interfringe = True
 
 # Debugging fringe search
 if debug_fringe_search:
@@ -81,3 +82,14 @@ if debug_failed_rotation:
     print(f"Todo cero? {np.all(img_rotada == 0)}")
     plt.imshow(img_rotada, cmap='gray')
     plt.show()
+
+# Debugging failed interfringe
+if debug_failed_interfringe:
+    with open("debug_failed_interfringe.pkl", "rb") as f:
+        data = pickle.load(f)
+
+    interferogram = data["interferogram"]
+    debugging_info = data["debugging_info"]
+    interfringe, arrow = analyze_interference(image_array=interferogram, save=False,
+                                              show_result=True,
+                                              debugging_info=debugging_info)
