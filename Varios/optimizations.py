@@ -44,6 +44,7 @@ def encontrar_maximo_cuadratica(arr_x, arr_y=None, max_number_points=7, extreme=
         min_index = np.argmin(arr_y)
         d_min_from_center = abs(min_index - len(arr_x) // 2)
         extreme_index = max_index if d_max_from_center < d_min_from_center else min_index
+    extreme_location = arr_x[extreme_index]
     extreme_value_by_index = arr_y[extreme_index]
     if len(arr_x) > max_number_points:
         center_index = extreme_index
@@ -79,9 +80,9 @@ def encontrar_maximo_cuadratica(arr_x, arr_y=None, max_number_points=7, extreme=
 
     # Determinar si es un máximo o mínimo
     if extreme == "max" and a >= 0:
-        return extreme_index, extreme_value_by_index, 0.0
+        return extreme_location, extreme_value_by_index, 0.0
     if extreme == "min" and a <= 0:
-        return extreme_index, extreme_value_by_index, 0.0
+        return extreme_location, extreme_value_by_index, 0.0
 
     return extr_x, extr_y, r_squared
 

@@ -1,3 +1,4 @@
+from typing import Tuple
 import numpy as np
 import cv2
 import matplotlib.pyplot as plt
@@ -99,7 +100,12 @@ def rotate_image_to_max_frequency(
         cumulative_intensity = np.sum(rotated_img, axis=0)
         variations_cum[ka] = np.var(cumulative_intensity[Nc // 2 - limit:Nc // 2 + limit])
 
+    plt.plot(possible_angles, variations_cum)
+    plt.show()
     angle, _, _ = encontrar_maximo_cuadratica(possible_angles, variations_cum)
+    print(angle)
+    quit()
+
     if angle < possible_angles[0] or angle > possible_angles[-1]:
         angle = possible_angles[np.argmax(variations_cum)]
 
@@ -390,7 +396,7 @@ def plot_minima_profile(profile, minima_indices):
 
 def analyze_interference(image_path=None, image_array=None, show=SHOW_ALL,
                          show_result=SHOW_EACH_RESULT, save=SAVE_RESULTS,
-                         debugging_info=None):
+                         debugging_info=None) -> Tuple[ufloat, ufloat]:
     assert image_path is not None or image_array is not None
     date = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
