@@ -91,5 +91,5 @@ if debug_failed_interfringe:
     interferogram = data["interferogram"]
     debugging_info = data["debugging_info"]
     interfringe, arrow = analyze_interference(image_array=interferogram, save=False,
-                                              show_result=True,
+                                              show_result=True, show=True,
                                               debugging_info=debugging_info)

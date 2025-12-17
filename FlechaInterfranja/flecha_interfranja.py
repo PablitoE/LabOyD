@@ -3,8 +3,8 @@ import numpy as np
 import cv2
 import matplotlib.pyplot as plt
 import pickle
-from scipy.signal import find_peaks
-from scipy.optimize import minimize, curve_fit
+from scipy.signal import find_peaks, peak_prominences
+from scipy.optimize import minimize, curve_fit, minimize_scalar
 from scipy.stats import linregress
 from scipy import fftpack
 from scipy.ndimage import rotate
@@ -53,6 +53,45 @@ image_path = r"/home/pablo/OneDrive/Documentos/INTI-Calibraciones/Planos/LMD 202
 output_dir = os.path.join(image_path, RESULTS_DIR)
 os.makedirs(output_dir, exist_ok=True)
 logger = logging.getLogger(__name__)
+
+
+def find_equidistant_peaks(signal, max_min='max', **kwargs):
+    signal = signal if max_min == 'max' else -signal
+
+    prominence = kwargs.pop('prominence', None)
+    peaks, properties = find_peaks(signal, prominence=prominence, **kwargs)
+    if len(peaks) < 3:  # Not enough peaks to keep equidistant ones
+        return peaks
+    d_peaks = np.diff(peaks)
+    good_differences = eliminar_outliers_iqr(d_peaks, return_mask=True, iqr_factor=1)
+    if np.all(good_differences):    # No suspicious peaks
+        return peaks
+
+    # Look for the most likely location of peaks
+    median_d_peak = np.median(d_peaks)
+
+    def model_shift_l1(x, period, points):
+        closest_n = np.round((points - x) / period).astype(int)
+        return np.sum(np.abs(points - closest_n * period - x))
+
+    res = minimize_scalar(model_shift_l1, bounds=(-median_d_peak / 2, median_d_peak / 2), args=(median_d_peak, peaks))
+    closest_ns = np.round((peaks - res.x) / median_d_peak).astype(int)
+
+    # Remove extra peaks by keeping the one closest to the median, and add peaks where missing
+    prominences = peak_prominences(signal, peaks)[0] if prominence is None else properties['prominences']
+    min_n = np.min(closest_ns)
+    max_n = np.max(closest_ns)
+    for n in range(min_n, max_n + 1):
+        idx_peaks_at_n = np.where(closest_ns == n)[0]
+        if len(idx_peaks_at_n) > 1:
+            closest_peaks = peaks[idx_peaks_at_n]
+            idx_peak_at_n = np.argmin(np.abs(closest_peaks - (n * median_d_peak + res.x)) / prominences[idx_peaks_at_n])
+            idx_peaks_at_n = np.delete(idx_peaks_at_n, idx_peak_at_n)
+            peaks = np.delete(peaks, idx_peaks_at_n)
+        if n not in closest_ns:
+            peaks = np.insert(peaks, n - min_n, n * median_d_peak + res.x)
+
+    return peaks
 
 
 def scaledLinearOp_To_array(scaledLinearOp):
@@ -433,8 +472,8 @@ def analyze_interference(image_path=None, image_array=None, show=SHOW_ALL,
     intensity_profile = remove_gaussian_from_curve(intensity_profile)
 
     # Encontrar los mínimos en el perfil de intensidad
-    peaks, _ = find_peaks(-intensity_profile, distance=MINIMUM_DISTANCE_PEAKS,
-                          prominence=PROMINENCE_PEAKS)
+    peaks = find_equidistant_peaks(intensity_profile, max_min='min', prominence=PROMINENCE_PEAKS,
+                                   distance=MINIMUM_DISTANCE_PEAKS)
 
     # Ploteo de los mínimos detectados en el perfil de intensidad
     if show:

@@ -9,7 +9,6 @@ from multiprocessing import Pool
 from interferogram_generation import FlatInterferogramGenerator
 from tqdm import tqdm
 from Varios.plot import boxplot_by_bins
-# import pickle     # For debugging
 
 
 BASE_SEED = 50
@@ -56,15 +55,19 @@ def worker(sim_id, simulated_deviation_nm, generator=None):
         interfringe, arrow = fei.analyze_interference(image_array=interferogram, save=False,
                                                       show_result=PLOT_FRINGE_DETECTION,
                                                       debugging_info=debugging_info)
+
         """
+        # Debugging
         interfringe_error = interfringe.n - 1 / generator.current_frequency
         if abs(interfringe_error) > 3:
+            import pickle
             with open("debug_failed_interfringe.pkl", "wb") as f:
                 data_to_save = {
                     "interferogram": interferogram,
                     "debugging_info": debugging_info
                 }
                 pickle.dump(data_to_save, f)
+                logging.critical("Interfringe error: %f. STOP. Image saved", interfringe_error)
                 quit()
         else:
             logging.critical("Interfringe error: %f", interfringe_error)
@@ -104,7 +107,7 @@ def worker(sim_id, simulated_deviation_nm, generator=None):
 
 
 if __name__ == "__main__":
-    MULTIPROCESSING = False
+    MULTIPROCESSING = True
     SAVE_PATH = "Data/Resultados/MonteCarloFEI"
     LOAD_FILENAME = ""
     logging.basicConfig(
