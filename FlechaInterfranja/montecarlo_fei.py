@@ -1,4 +1,5 @@
 import os
+import pickle
 from datetime import datetime
 import numpy as np
 import flecha_interfranja as fei
@@ -56,22 +57,19 @@ def worker(sim_id, simulated_deviation_nm, generator=None):
                                                       show_result=PLOT_FRINGE_DETECTION,
                                                       debugging_info=debugging_info)
 
-        """
         # Debugging
         interfringe_error = interfringe.n - 1 / generator.current_frequency
-        if abs(interfringe_error) > 3:
-            import pickle
-            with open("debug_failed_interfringe.pkl", "wb") as f:
+        if abs(interfringe_error) > 2:
+            with open("debug_failed_interfringe.pkl", "ab+") as f:
                 data_to_save = {
                     "interferogram": interferogram,
                     "debugging_info": debugging_info
                 }
                 pickle.dump(data_to_save, f)
-                logging.critical("Interfringe error: %f. STOP. Image saved", interfringe_error)
-                quit()
-        else:
-            logging.critical("Interfringe error: %f", interfringe_error)
-        """
+                # logging.critical("Interfringe error: %f. STOP. Image saved", interfringe_error)
+                # quit()
+        # else:
+            # logging.critical("Interfringe error: %f", interfringe_error)
 
         arrows.append(arrow)
         interfringes.append(interfringe)
@@ -107,7 +105,7 @@ def worker(sim_id, simulated_deviation_nm, generator=None):
 
 
 if __name__ == "__main__":
-    MULTIPROCESSING = True
+    MULTIPROCESSING = False
     SAVE_PATH = "Data/Resultados/MonteCarloFEI"
     LOAD_FILENAME = ""
     logging.basicConfig(
@@ -120,8 +118,8 @@ if __name__ == "__main__":
 
     N_MC_SAMPLES = 200
     N_IMS_PER_SAMPLE = 10
-    MIN_N_FRINGES = 7
-    MAX_N_FRINGES = 20
+    MIN_N_FRINGES = 12
+    MAX_N_FRINGES = 26
     MAX_ROTATION_DEG = 5
     VISIBILITY_RATIO = 0.5
     NOISE_LEVEL = 0.001             # Relative to visibility ratio
@@ -157,12 +155,9 @@ if __name__ == "__main__":
         mean_rms_distance_to_valley = np.zeros((N_MC_SAMPLES, N_IMS_PER_SAMPLE))
 
         if MULTIPROCESSING:
-            start_time = datetime.now()
             with Pool() as pool:
                 args = [(sim_id, simulated_deviation_nm[sim_id]) for sim_id in range(N_MC_SAMPLES)]
                 results = list(tqdm(pool.imap(worker_star, args), total=N_MC_SAMPLES))
-            end_time = datetime.now()
-            logging.critical(f"Tiempo de ejecución: {end_time - start_time}")
 
             for i in range(N_MC_SAMPLES):
                 (
@@ -199,8 +194,8 @@ if __name__ == "__main__":
             fig_interfranja, axs = plt.subplots(2, 2, figsize=(16, 10))
             axs[0, 0].plot(range(1, N_IMS_PER_SAMPLE + 1), interfringe_rmse, 'o-')
             axs[0, 1].plot(range(1, N_IMS_PER_SAMPLE + 1), relative_interfringe_rmse, 'o-')
-            axs[0, 0].set_xlabel('Número de interferograma')
-            axs[0, 1].set_xlabel('Número de interferograma')
+            axs[0, 0].set_xlabel(f'Número de interferograma ({MIN_N_FRINGES} a {MAX_N_FRINGES} franjas)')
+            axs[0, 1].set_xlabel(f'Número de interferograma ({MIN_N_FRINGES} a {MAX_N_FRINGES} franjas)')
             axs[0, 0].set_ylabel('RMSE del espaciamiento interfranja (píxeles)')
             axs[0, 1].set_ylabel('RMSE del espaciamiento interfranja relativo al valor simulado')
             rmse_interfringe_spacings = np.sqrt(np.mean(error_interfringe_spacings**2, axis=1))
@@ -217,7 +212,7 @@ if __name__ == "__main__":
 
             fig_error_rot_valles, axs = plt.subplots(2, 3, figsize=(16, 10))
             axs[0, 0].boxplot(np.abs(error_rotation_estimation_corrected), positions=range(1, N_IMS_PER_SAMPLE + 1))
-            axs[0, 0].set_xlabel('Número de interferograma')
+            axs[0, 0].set_xlabel(f'Número de interferograma ({MIN_N_FRINGES} a {MAX_N_FRINGES} franjas)')
             axs[0, 0].set_ylabel('Errores en la estimación de rotación (°)')
             rmse_error_rotation = np.sqrt(np.mean(error_rotation_estimation ** 2, axis=1))
             rmse_error_rotation_corrected = np.sqrt(np.mean(error_rotation_estimation_corrected ** 2, axis=1))
@@ -268,12 +263,22 @@ if __name__ == "__main__":
     logger.info(f"RMSE (lineal): {np.mean(errors)}")
 
     if PLOT_RESULTS:
-        plt.figure(figsize=(8, 6))
-        plt.plot(simulated_deviation_nm, nominal_values(measured_max_deviations), 'o')
-        plt.plot(simulated_deviation_nm, predicted_measured_deviations, 'o-', label='Ajuste lineal')
-        plt.xlabel('Desviación máxima simulada (nm)')
-        plt.ylabel('Desviación máxima medida (nm)')
-        plt.grid(True)
-        plt.legend()
-        plt.savefig(os.path.join(SAVE_PATH, f"{date}_scatter_desviaciones_maximas.png"))
+        fig, axs = plt.subplots(1, 2, figsize=(16, 6))
+        axs[0].plot(simulated_deviation_nm, nominal_values(measured_max_deviations), 'o')
+        axs[0].plot(
+            simulated_deviation_nm, predicted_measured_deviations,
+            '--', label=f'Ajuste lineal: m={proportionality_constant:.3f}',
+        )
+        axs[0].set_xlabel('Desviación máxima simulada (nm)')
+        axs[0].set_ylabel('Desviación máxima medida (nm)')
+        axs[0].grid(True)
+        axs[0].legend()
+        boxplot_by_bins(
+            simulated_deviation_nm, np.abs(
+                nominal_values(measured_max_deviations) - predicted_measured_deviations
+            ), ax=axs[1]
+        )
+        axs[1].set_xlabel('Desviación máxima simulada (nm)')
+        axs[1].set_ylabel('Errores absolutos contra ajuste lineal (nm)')
+        fig.savefig(os.path.join(SAVE_PATH, f"{date}_scatter_desviaciones_maximas.png"))
         plt.show()
