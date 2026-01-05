@@ -2,7 +2,7 @@ import numpy as np
 from scipy.interpolate import make_splprep
 
 
-def encontrar_maximo_cuadratica(arr_x, arr_y=None, max_number_points=7, extreme="max"):
+def encontrar_maximo_cuadratica(arr_x, arr_y=None, max_number_points=7, extreme="max", show=False):
     """
     Encontrar el extremo de un array 1d que tiene forma de cuadrática
     ajustando un polinomio de orden 2
@@ -32,6 +32,9 @@ def encontrar_maximo_cuadratica(arr_x, arr_y=None, max_number_points=7, extreme=
 
     if np.all(arr_y == 0):
         return arr_x[len(arr_x) // 2], 0, 0.0
+
+    arr_x_original = arr_x.copy()
+    arr_y_original = arr_y.copy()
 
     # Limitar el número de puntos para el ajuste
     if extreme == "max":
@@ -77,6 +80,20 @@ def encontrar_maximo_cuadratica(arr_x, arr_y=None, max_number_points=7, extreme=
     a, b, c = coeffs
     extr_x = -b / (2 * a)
     extr_y = poly(extr_x)
+
+    # Plot para depuración
+    if show:
+        import matplotlib.pyplot as plt
+
+        x_fit = np.linspace(np.min(arr_x), np.max(arr_x), 100)
+        y_fit = poly(x_fit)
+
+        plt.plot(arr_x_original, arr_y_original, 'o', label='Datos')
+        plt.plot(x_fit, y_fit, '-', label='Ajuste cuadrático')
+        plt.plot(extr_x, extr_y, 'rx', label='Extremo encontrado')
+        plt.legend()
+        plt.title(f'Ajuste cuadrático (R² = {r_squared:.4f})')
+        plt.show()
 
     # Determinar si es un máximo o mínimo
     if extreme == "max" and a >= 0:

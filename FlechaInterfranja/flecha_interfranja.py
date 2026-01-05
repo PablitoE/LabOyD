@@ -100,7 +100,8 @@ def scaledLinearOp_To_array(scaledLinearOp):
 
 
 def rotate_image_to_max_frequency(
-    img_array, ignore_low_freq_pixels=2, precision=3, range_angle_deg=4, n_range_angle=11
+    img_array, ignore_low_freq_pixels=2, precision=3, range_angle_deg=4, n_range_angle=11, n_refine_neighbors=2,
+    n_refine_add_between=2, central_rows_ratio=None
 ):
     Nr, Nc = img_array.shape
     Nr_ = Nr * precision
@@ -119,13 +120,19 @@ def rotate_image_to_max_frequency(
     max_freq_idx = (Nr_//2 - max_freq_idx[0], max_freq_idx[1])
 
     # Calcular el ángulo de rotación
-    angle = np.rad2deg(np.arctan2(max_freq_idx[0], max_freq_idx[1]))
+    angle = - np.rad2deg(np.arctan2(max_freq_idx[0], max_freq_idx[1]))
+
+    # Definir filas centrales para el análisis
+    if central_rows_ratio is None:
+        central_rows_ratio = 1
+    assert 0 < central_rows_ratio <= 1, "central_rows_ratio debe ser menor o igual a 1"
+    central_rows = slice(int(Nr * (0.5 - central_rows_ratio / 2)), int(Nr * (0.5 + central_rows_ratio / 2)))
 
     # Proponer varios ángulos posibles
     variations_cum = np.zeros(n_range_angle)
     possible_angles = np.linspace(angle - range_angle_deg, angle + range_angle_deg,
                                   n_range_angle)
-    cumulative_intensity = np.sum(img_array.astype(np.float64), axis=0)
+    cumulative_intensity = np.sum(img_array[central_rows].astype(np.float64), axis=0)
     if Nc % 2 == 0:
         cumulative_intensity = cumulative_intensity[Nc//2:] + np.flip(cumulative_intensity[:Nc//2])
     else:
@@ -136,10 +143,33 @@ def rotate_image_to_max_frequency(
 
     for ka, angle in enumerate(possible_angles):
         rotated_img = rotate(img_array, angle, mode='nearest', reshape=False)
-        cumulative_intensity = np.sum(rotated_img, axis=0)
+        cumulative_intensity = np.sum(rotated_img[central_rows], axis=0)
         variations_cum[ka] = np.var(cumulative_intensity[Nc // 2 - limit:Nc // 2 + limit])
 
-    angle, _, _ = encontrar_maximo_cuadratica(possible_angles, variations_cum)
+    # Proponer ángulos posibles cercanos al máximo
+    idx_max = np.argmax(variations_cum)
+    start_refine = max(0, idx_max - n_refine_neighbors)
+    end_refine = min(n_range_angle, idx_max + n_refine_neighbors + 1)
+    new_possible_angles = np.linspace(
+        possible_angles[start_refine], possible_angles[end_refine - 1],
+        (n_refine_add_between + 1) * (end_refine - start_refine) - n_refine_add_between
+    )
+    new_variations_cum = np.zeros(len(new_possible_angles))
+    for ka, angle in enumerate(new_possible_angles):
+        if angle in possible_angles:
+            new_variations_cum[ka] = variations_cum[np.where(possible_angles == angle)[0][0]]
+            continue
+        rotated_img = rotate(img_array, angle, mode='nearest', reshape=False)
+        cumulative_intensity = np.sum(rotated_img[central_rows], axis=0)
+        new_variations_cum[ka] = np.var(cumulative_intensity[Nc // 2 - limit:Nc // 2 + limit])
+    possible_angles = np.concatenate(
+        (possible_angles[:start_refine], new_possible_angles, possible_angles[end_refine:])
+    )
+    variations_cum = np.concatenate((
+        variations_cum[:start_refine], new_variations_cum, variations_cum[end_refine:]
+    ))
+
+    angle, _, _ = encontrar_maximo_cuadratica(possible_angles, variations_cum, show=False)
 
     if angle < possible_angles[0] or angle > possible_angles[-1]:
         angle = possible_angles[np.argmax(variations_cum)]
@@ -447,7 +477,8 @@ def analyze_interference(image_path=None, image_array=None, show=SHOW_ALL,
     img_rotada, angle_rotated = rotate_image_to_max_frequency(img,
                                                               ignore_low_freq_pixels=ROTATION_IGNORE_LOW_FREQ_PIXELS,
                                                               range_angle_deg=ROTATION_RANGE_ANGLE_DEG,
-                                                              n_range_angle=ROTATION_N_RANGE_ANGLE)
+                                                              n_range_angle=ROTATION_N_RANGE_ANGLE,
+                                                              central_rows_ratio=0.2)
     if np.all(img_rotada == 0):
         print("Todo cero!")
         with open(f"{date}_debug_failed_rotation.pkl", "wb") as f:
@@ -561,6 +592,11 @@ def analyze_interference(image_path=None, image_array=None, show=SHOW_ALL,
         local_min = np.unravel_index(np.argmin(peak_area), peak_area.shape)
         x_positions.append(local_min[1] + x_range[0])
         y_positions.append(local_min[0] + y_range[0])
+
+        # plt.imshow(peak_area, cmap='gray')
+        # plt.plot(local_min[1], local_min[0], 'ro')
+        # plt.plot(n_search_fringe, n_search_fringe, 'bo')
+        # plt.show()
 
     x_positions = np.array(x_positions)
     y_positions = np.array(y_positions)
