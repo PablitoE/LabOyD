@@ -3,7 +3,7 @@ import pickle
 from datetime import datetime
 import numpy as np
 import flecha_interfranja as fei
-from uncertainties.unumpy import nominal_values, uarray
+from uncertainties.unumpy import nominal_values, uarray, std_devs
 import matplotlib.pyplot as plt
 import logging
 from multiprocessing import Pool
@@ -69,7 +69,7 @@ def worker(sim_id, simulated_deviation_nm, generator=None):
                 # logging.critical("Interfringe error: %f. STOP. Image saved", interfringe_error)
                 # quit()
         # else:
-            # logging.critical("Interfringe error: %f", interfringe_error)
+        # logging.critical("Interfringe error: %f", interfringe_error)
 
         arrows.append(arrow)
         interfringes.append(interfringe)
@@ -81,16 +81,23 @@ def worker(sim_id, simulated_deviation_nm, generator=None):
         )
         mean_rms_distance_to_valley[k_interferogram] = debugging_info["rmsd_to_valley_curves"]
     arrows = nominal_values(arrows)
-    interfringes = nominal_values(interfringes)
+    measured_interfringe_spacings = nominal_values(interfringes)
+    measured_interfringe_spacings_std = std_devs(interfringes)
     simulated_interfringe_spacings = 1 / generator.carrier_frequencies
-    measured_interfringe_spacings = interfringes
 
     if not MULTIPROCESSING and PLOT_FITS:
-        pendiente, x, y, descartados, no_descartados = fei.analisis_flechas_interfranjas(arrows, interfringes)
-        fei.plot_flechas_interfranjas(arrows, interfringes, save_path=None, iqr_factor=0.75)
+        pendiente, x, y, descartados, no_descartados = fei.analisis_flechas_interfranjas(
+            arrows, measured_interfringe_spacings
+        )
+        fei.plot_flechas_interfranjas(arrows, measured_interfringe_spacings, save_path=None, iqr_factor=0.75)
         # Los resultados parecen dar bastante ajustados a la recta resultante.
     else:
-        pendiente = fei.analisis_flechas_interfranjas(arrows, interfringes, full_output=False)
+        pendiente = fei.analisis_flechas_interfranjas(
+            arrows,
+            measured_interfringe_spacings,
+            full_output=False,
+            uncertainties=[measured_interfringe_spacings_std, 0.5],
+        )
 
     if SIMULATION_MODE in ["random", "random_maxfixed"]:
         simulated_deviation_nm = generator.current_maximum_deviation_nm
@@ -105,7 +112,7 @@ def worker(sim_id, simulated_deviation_nm, generator=None):
 
 
 if __name__ == "__main__":
-    MULTIPROCESSING = False
+    MULTIPROCESSING = True
     SAVE_PATH = "Data/Resultados/MonteCarloFEI"
     LOAD_FILENAME = ""
     logging.basicConfig(
@@ -263,7 +270,7 @@ if __name__ == "__main__":
     logger.info(f"RMSE (lineal): {np.mean(errors)}")
 
     if PLOT_RESULTS:
-        fig, axs = plt.subplots(1, 2, figsize=(16, 6))
+        fig, axs = plt.subplots(1, 3, figsize=(16, 6))
         axs[0].plot(simulated_deviation_nm, nominal_values(measured_max_deviations), 'o')
         axs[0].plot(
             simulated_deviation_nm, predicted_measured_deviations,
@@ -280,5 +287,9 @@ if __name__ == "__main__":
         )
         axs[1].set_xlabel('Desviación máxima simulada (nm)')
         axs[1].set_ylabel('Errores absolutos contra ajuste lineal (nm)')
+        axs[2].plot(simulated_deviation_nm, std_devs(measured_max_deviations), 'o')
+        axs[2].set_xlabel('Desviación máxima simulada (nm)')
+        axs[2].set_ylabel('Incertidumbre del ajuste proporcional flecha-interfranja (nm)')
+        axs[2].grid(True)
         fig.savefig(os.path.join(SAVE_PATH, f"{date}_scatter_desviaciones_maximas.png"))
         plt.show()

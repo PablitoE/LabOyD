@@ -119,3 +119,14 @@ def spline_zeros(rc, z):
     for i, y in enumerate(xy_out[:, 1]):
         xy_out[i, 0] = spline(y)[0]
     return xy_out
+
+
+def proportionality_with_uncertainties(x, y, ux, uy):
+    a = np.sum(x*y / uy**2) / np.sum(x**2 / uy**2)
+
+    for _ in range(20):
+        w = 1 / (uy**2 + (a**2) * ux**2)
+        a = np.sum(w * x * y) / np.sum(w * x**2)
+
+    ua = np.sqrt(1 / np.sum(w * x**2))
+    return a, ua

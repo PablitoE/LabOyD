@@ -14,15 +14,15 @@ import os
 import re
 import logging
 from datetime import datetime
-from Varios.optimizations import encontrar_maximo_cuadratica
+from Varios.optimizations import encontrar_maximo_cuadratica, proportionality_with_uncertainties
 from Varios.lines_points import associate_two_sets_of_lines, rotate_2d_points
 
 
 WAVELENGTH_NM = 633
 
 ROTATION_IGNORE_LOW_FREQ_PIXELS = 3
-ROTATION_RANGE_ANGLE_DEG = 7
-ROTATION_N_RANGE_ANGLE = 15
+ROTATION_RANGE_ANGLE_DEG = 4
+ROTATION_N_RANGE_ANGLE = 13
 MINIMUM_DISTANCE_PEAKS = 10
 PROMINENCE_PEAKS = 1
 GAUSSIAN_BLUR_SIGMA = 2
@@ -41,7 +41,7 @@ MAX_NUMBER_POINTS_FIT = 7
 REQUIRED_IMS = 10
 RESULTS_DIR = "results"
 IQR_FACTOR_IMS = 1.0
-IQR_FACTOR_POINTS_IN_FRINGES = 2.0
+IQR_FACTOR_POINTS_IN_FRINGES = 3.0
 
 SHOW_ALL = False
 SHOW_EACH_RESULT = False
@@ -478,6 +478,8 @@ def analyze_interference(image_path=None, image_array=None, show=SHOW_ALL,
                                                               ignore_low_freq_pixels=ROTATION_IGNORE_LOW_FREQ_PIXELS,
                                                               range_angle_deg=ROTATION_RANGE_ANGLE_DEG,
                                                               n_range_angle=ROTATION_N_RANGE_ANGLE,
+                                                              n_refine_neighbors=2,
+                                                              n_refine_add_between=1,
                                                               central_rows_ratio=0.2)
     if np.all(img_rotada == 0):
         print("Todo cero!")
@@ -685,7 +687,7 @@ def analyze_interference(image_path=None, image_array=None, show=SHOW_ALL,
             #     show_result = True  # Forzar ploteo si RMSD es muy alto
     total_distances = max_distance_positive['value'] - max_distance_negative['value']
     max_total_distance = np.max(total_distances).astype(float)
-    error_max_distance = np.std(total_distances) / np.sqrt(len(total_distances))
+    error_max_distance = 0.5  # np.std(total_distances) / np.sqrt(len(total_distances))
     flecha = ufloat(max_total_distance, error_max_distance)
     logging.info("Desviación máxima de la recta: %s (k=1)", flecha)
     if debugging_info is not None and "valley_curves" in debugging_info.keys():
@@ -728,10 +730,16 @@ def analyze_interference(image_path=None, image_array=None, show=SHOW_ALL,
     return interfringe_distance, flecha
 
 
-def analisis_flechas_interfranjas(flechas, interfranjas, iqr_factor=0.75, full_output=True):
-    pendiente, intercepto, _, _, std_err = linregress(interfranjas, flechas)
-
-    y = pendiente * interfranjas + intercepto
+def analisis_flechas_interfranjas(flechas, interfranjas, iqr_factor=0.75, full_output=True, uncertainties=None):
+    if uncertainties is not None and len(uncertainties) == 2:
+        pendiente, std_err = proportionality_with_uncertainties(
+            interfranjas, flechas, uncertainties[0], uncertainties[1]
+        )
+        y = pendiente * interfranjas
+        intercepto = 0.0
+    else:
+        pendiente, intercepto, _, _, std_err = linregress(interfranjas, flechas)
+        y = pendiente * interfranjas + intercepto
     errores = np.abs(flechas - y)
     mask_buenos = eliminar_outliers_iqr(
         errores, return_mask=True, only_upper=True, iqr_factor=iqr_factor
@@ -741,9 +749,17 @@ def analisis_flechas_interfranjas(flechas, interfranjas, iqr_factor=0.75, full_o
     no_descartados = np.where(mask_buenos)[0]
 
     if np.any(~mask_buenos):
-        pendiente, intercepto, _, _, std_err = linregress(
-            interfranjas[no_descartados], flechas[no_descartados]
-        )
+        if uncertainties is not None and len(uncertainties) == 2:
+            uncertainties = [u[no_descartados] if isinstance(u, np.ndarray) else u for u in uncertainties]
+            pendiente, std_err = proportionality_with_uncertainties(
+                interfranjas[no_descartados], flechas[no_descartados],
+                uncertainties[0], uncertainties[1]
+            )
+            y = pendiente * interfranjas[no_descartados]
+        else:
+            pendiente, intercepto, _, _, std_err = linregress(
+                interfranjas[no_descartados], flechas[no_descartados]
+            )
     x = np.linspace(interfranjas.min(), interfranjas.max(), 4)
     y = pendiente * x + intercepto
     pendiente_u = ufloat(pendiente, std_err)
