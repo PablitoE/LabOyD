@@ -42,6 +42,7 @@ REQUIRED_IMS = 10
 RESULTS_DIR = "results"
 IQR_FACTOR_IMS = 1.0
 IQR_FACTOR_POINTS_IN_FRINGES = 3.0
+OPTIMIZE_REGULARIZER_MAX_DEV = 0.1
 
 SHOW_ALL = False
 SHOW_EACH_RESULT = False
@@ -285,24 +286,39 @@ def maximum_estimator_uniform(values, uncertainty_mode="std", confidence=0.95):
     return ufloat(max_estimation, u_estimation)
 
 
-def optimize_lines(fringes):
+def optimize_lines(fringes, regularizer_max_dev=0, track=False):
     "Como las rectas son normalmente verticales, conviene usar un modelo: x = my + b"
-    def mse(parameters, fringes):
+    def mse(parameters, fringes, regularized_max_dev=0):
         slope = parameters[0]
         interfringe_y = parameters[1]
         first_intercept = parameters[2]
         n_fringes = len(fringes)
         intercepts = first_intercept + np.arange(n_fringes) * interfringe_y
         total_se = 0
-        all_distances = distances_sets_of_points_to_lines(fringes, slope, intercepts)
+        all_distances = distances_sets_of_points_to_lines(fringes, slope, intercepts, signed=False)
         for distances in all_distances:
             total_se += np.sum(distances ** 2)
         total_points = np.sum([len(fringe) for fringe in fringes])
-        return total_se / total_points
+        mse = total_se / total_points
+        if regularized_max_dev > 0:
+            max_dev = np.max([np.max(distances) for distances in all_distances])
+            mse += regularized_max_dev * max_dev**2
+        return mse
+
+    def tracker(xk):
+        fun_history.append(mse(xk, fringes, regularizer_max_dev))
 
     initial_guess = np.zeros(3)
     bounds = [(None, None), (0, 10000), (0, 10000)]
-    result = minimize(mse, initial_guess, args=fringes, method='L-BFGS-B', bounds=bounds)
+    fun_history = []
+    callbackFun = tracker if track else None
+    result = minimize(
+        mse, initial_guess, args=(fringes, regularizer_max_dev), method='L-BFGS-B', bounds=bounds, callback=callbackFun
+    )
+
+    if track:
+        plt.plot(fun_history)
+        plt.show()
 
     slope = result.x[0]
     interfringe_y = result.x[1]
@@ -652,7 +668,7 @@ def analyze_interference(image_path=None, image_array=None, show=SHOW_ALL,
         )
 
     # Ajustar franjas con rectas
-    slope, intercepts, interfringe_distance = optimize_lines(fringes)
+    slope, intercepts, interfringe_distance = optimize_lines(fringes, regularizer_max_dev=OPTIMIZE_REGULARIZER_MAX_DEV)
 
     # Actualizar valor de rotación estimada
     angle_rotated = angle_rotated - np.rad2deg(np.arctan(slope))
