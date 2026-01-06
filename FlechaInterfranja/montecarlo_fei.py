@@ -107,7 +107,7 @@ def worker(sim_id, simulated_deviation_nm, generator=None):
         simulated_interfringe_spacings, measured_interfringe_spacings,
         simulated_deviation_nm, measured_max_deviation, simulated_rotation_angle,
         error_rotation_estimation, error_rotation_estimation_corrected,
-        mean_rms_distance_to_valley,
+        mean_rms_distance_to_valley, arrows
     )
 
 
@@ -127,9 +127,9 @@ if __name__ == "__main__":
     N_IMS_PER_SAMPLE = 10
     MIN_N_FRINGES = 12
     MAX_N_FRINGES = 26
-    MAX_ROTATION_DEG = 5
+    MAX_ROTATION_DEG = 20
     VISIBILITY_RATIO = 0.5
-    NOISE_LEVEL = 0.001             # Relative to visibility ratio
+    NOISE_LEVEL = 0.015             # Relative to visibility ratio
     WAVELENGTH_NM = 632.8
     MAX_DEVIATION_NM = 150.0
     PLOT_INTERFEROGRAMS = False
@@ -160,6 +160,7 @@ if __name__ == "__main__":
         error_rotation_estimation = np.zeros((N_MC_SAMPLES, N_IMS_PER_SAMPLE))
         error_rotation_estimation_corrected = np.zeros((N_MC_SAMPLES, N_IMS_PER_SAMPLE))
         mean_rms_distance_to_valley = np.zeros((N_MC_SAMPLES, N_IMS_PER_SAMPLE))
+        arrows_all = np.zeros((N_MC_SAMPLES, N_IMS_PER_SAMPLE))
 
         if MULTIPROCESSING:
             with Pool() as pool:
@@ -171,7 +172,7 @@ if __name__ == "__main__":
                     simulated_interfringe_spacings[i, :], measured_interfringe_spacings[i, :],
                     simulated_deviation_nm[i], measured_max_deviations[i], simulated_rotation[i, :],
                     error_rotation_estimation[i, :], error_rotation_estimation_corrected[i, :],
-                    mean_rms_distance_to_valley[i, :],
+                    mean_rms_distance_to_valley[i, :], arrows_all[i, :]
                 ) = results[i]
         else:
             generator = FlatInterferogramGenerator(shape=(1024, 1024),
@@ -191,7 +192,7 @@ if __name__ == "__main__":
                     simulated_interfringe_spacings[i, :], measured_interfringe_spacings[i, :],
                     simulated_deviation_nm[i], measured_max_deviations[i], simulated_rotation[i, :],
                     error_rotation_estimation[i, :], error_rotation_estimation_corrected[i, :],
-                    mean_rms_distance_to_valley[i, :],
+                    mean_rms_distance_to_valley[i, :], arrows_all[i, :]
                 ) = worker(i, simulated_deviation_nm[i], generator=generator)
 
         if PLOT_RESULTS:
@@ -240,7 +241,7 @@ if __name__ == "__main__":
             axs[0, 2].set_ylabel('Errores en la estimación de rotación por optimización (°)')
 
             axs[1, 0].boxplot(mean_rms_distance_to_valley, positions=range(1, N_IMS_PER_SAMPLE + 1))
-            axs[1, 0].set_xlabel('Número de interferograma')
+            axs[1, 0].set_xlabel(f'Número de interferograma ({MIN_N_FRINGES} a {MAX_N_FRINGES} franjas)')
             axs[1, 0].set_ylabel('RMS de la distancia a curvas valle (píxeles)')
             rmse_mean_rms_distance_to_valley = np.sqrt(np.mean(mean_rms_distance_to_valley ** 2, axis=1))
             axs[1, 1].plot(simulated_deviation_nm, rmse_mean_rms_distance_to_valley, 'o')
@@ -252,6 +253,24 @@ if __name__ == "__main__":
             for ax in axs.flatten():
                 ax.grid(True)
             fig_error_rot_valles.savefig(os.path.join(SAVE_PATH, f"{date}_error_rotacion_valles.png"))
+
+            fig_error_arrows, axs = plt.subplots(1, 2, figsize=(16, 6))
+            simulated_arrows_px = (
+                simulated_deviation_nm[:, np.newaxis] / WAVELENGTH_NM * 2 * simulated_interfringe_spacings
+            )
+            error_arrows = arrows_all - simulated_arrows_px
+            error_arrows_rmse_by_interfringe = np.sqrt(np.mean(error_arrows**2, axis=0))
+            axs[0].plot(range(1, N_IMS_PER_SAMPLE + 1), error_arrows_rmse_by_interfringe, 'o-')
+            axs[0].boxplot(error_arrows, positions=range(1, N_IMS_PER_SAMPLE + 1))
+            axs[0].set_xlabel(f'Número de interferograma ({MIN_N_FRINGES} a {MAX_N_FRINGES} franjas)')
+            axs[0].set_ylabel('Error en la estimación de flecha (píxeles)')
+            axs[1].plot(simulated_deviation_nm, np.linalg.norm(error_arrows, axis=1), 'o')
+            axs[1].set_xlabel('Desviación máxima simulada (nm)')
+            axs[1].set_ylabel('Error RMSE en la estimación de flecha (píxeles)')
+            error_arrows_rel = error_arrows / simulated_arrows_px
+            for ax in axs:
+                ax.grid(True)
+            fig_error_arrows.savefig(os.path.join(SAVE_PATH, f"{date}_error_flechas.png"))
 
         errors = np.sqrt(np.abs(nominal_values(measured_max_deviations) - simulated_deviation_nm) ** 2)
         logger.info(f"RMSE: {np.mean(errors)}")
