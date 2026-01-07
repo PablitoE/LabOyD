@@ -1,4 +1,5 @@
 import numpy as np
+import matplotlib.pyplot as plt
 from scipy.interpolate import make_splprep
 
 
@@ -130,3 +131,64 @@ def proportionality_with_uncertainties(x, y, ux, uy):
 
     ua = np.sqrt(1 / np.sum(w * x**2))
     return a, ua
+
+
+class OptimizerState:
+    def __init__(self, objective_function, args=(), track_cost_function=False, regularization_parameter=0.0):
+        self.lambda_history = []
+        self.iteration = 0
+        self.fun_history = []
+        self.reg_lambda = regularization_parameter
+        self.track_cost_function = track_cost_function
+        self.objective_function = objective_function
+        self.args = args
+        self.this_iteration_evals = []
+
+    @property
+    def reg_lambda(self):
+        return self._reg_lambda
+
+    @reg_lambda.setter
+    def reg_lambda(self, value):
+        self._reg_lambda = value
+        self.lambda_history.append([self.iteration, value])
+
+    def objective(self, x):
+        """
+        The objective function has arguments (x, regularization_parameter, *args)
+        """
+        loss, penalty = self.objective_function(x, self.reg_lambda, *self.args)
+        fun = loss + penalty
+        self.this_iteration_evals.append((x, loss, penalty, fun))
+        return fun
+
+    def __call__(self, intermediate_result):
+        self.iteration += 1
+        values_cost_this_iteration = np.array([[loss, p, f] for _, loss, p, f in self.this_iteration_evals])
+        values_cost_current = values_cost_this_iteration[values_cost_this_iteration[:, 2] == intermediate_result.fun]
+
+        if self.track_cost_function:
+            self.fun_history.append(values_cost_current)
+        self.this_iteration_evals = []
+
+    def plot_history(self):
+        if self.track_cost_function:
+            fun_history = np.concatenate(self.fun_history, axis=0)
+            loss_proportion = fun_history[:, 0] / fun_history[:, 2]
+            penalty_proportion = fun_history[:, 1] / fun_history[:, 2]
+            fig, axs = plt.subplots(1, 2, figsize=(16, 6))
+            axs[0].plot(fun_history[:, 2], label='Objective Function Value')
+            for lambda_point in self.lambda_history:
+                axs[0].axvline(x=lambda_point[0], color='r', linestyle='--', alpha=0.5,
+                               label=f'Lambda = {lambda_point[1]:.3f}')
+            axs[0].set_xlabel('Iteration')
+            axs[0].set_ylabel('Objective Function Value')
+            axs[0].set_title('Objective Function History')
+            axs[0].legend()
+            axs[1].plot(loss_proportion, label='Loss Proportion')
+            axs[1].plot(penalty_proportion, label='Penalty Proportion')
+            axs[1].set_xlabel('Iteration')
+            axs[1].set_ylabel('Proportion')
+            axs[1].set_title('Loss and Penalty Proportions')
+            axs[1].legend()
+            plt.show()

@@ -14,7 +14,7 @@ import os
 import re
 import logging
 from datetime import datetime
-from Varios.optimizations import encontrar_maximo_cuadratica, proportionality_with_uncertainties
+from Varios.optimizations import encontrar_maximo_cuadratica, proportionality_with_uncertainties, OptimizerState
 from Varios.lines_points import associate_two_sets_of_lines, rotate_2d_points
 
 
@@ -42,7 +42,7 @@ REQUIRED_IMS = 10
 RESULTS_DIR = "results"
 IQR_FACTOR_IMS = 1.0
 IQR_FACTOR_POINTS_IN_FRINGES = 3.0
-OPTIMIZE_REGULARIZER_MAX_DEV = 0.1
+OPTIMIZE_REGULARIZER_MAX_DEV = 0.03
 
 SHOW_ALL = False
 SHOW_EACH_RESULT = False
@@ -288,7 +288,7 @@ def maximum_estimator_uniform(values, uncertainty_mode="std", confidence=0.95):
 
 def optimize_lines(fringes, regularizer_max_dev=0, track=False):
     "Como las rectas son normalmente verticales, conviene usar un modelo: x = my + b"
-    def mse(parameters, fringes, regularized_max_dev=0):
+    def mse(parameters, regularized_max_dev, fringes):
         slope = parameters[0]
         interfringe_y = parameters[1]
         first_intercept = parameters[2]
@@ -299,26 +299,26 @@ def optimize_lines(fringes, regularizer_max_dev=0, track=False):
         for distances in all_distances:
             total_se += np.sum(distances ** 2)
         total_points = np.sum([len(fringe) for fringe in fringes])
-        mse = total_se / total_points
+        loss = total_se / total_points
         if regularized_max_dev > 0:
             max_dev = np.max([np.max(distances) for distances in all_distances])
-            mse += regularized_max_dev * max_dev**2
-        return mse
+            penalty = regularized_max_dev * max_dev**2
+        else:
+            penalty = 0
+        return loss, penalty
 
-    def tracker(xk):
-        fun_history.append(mse(xk, fringes, regularizer_max_dev))
+    state = OptimizerState(mse, (fringes, ), regularization_parameter=0.0, track_cost_function=track)
 
     initial_guess = np.zeros(3)
     bounds = [(None, None), (0, 10000), (0, 10000)]
-    fun_history = []
-    callbackFun = tracker if track else None
     result = minimize(
-        mse, initial_guess, args=(fringes, regularizer_max_dev), method='L-BFGS-B', bounds=bounds, callback=callbackFun
+        state.objective, initial_guess, method='L-BFGS-B', bounds=bounds, callback=state
     )
-
-    if track:
-        plt.plot(fun_history)
-        plt.show()
+    state.reg_lambda = regularizer_max_dev
+    result = minimize(
+        state.objective, result.x, method='L-BFGS-B', bounds=bounds, callback=state
+    )
+    state.plot_history()
 
     slope = result.x[0]
     interfringe_y = result.x[1]
@@ -668,7 +668,9 @@ def analyze_interference(image_path=None, image_array=None, show=SHOW_ALL,
         )
 
     # Ajustar franjas con rectas
-    slope, intercepts, interfringe_distance = optimize_lines(fringes, regularizer_max_dev=OPTIMIZE_REGULARIZER_MAX_DEV)
+    slope, intercepts, interfringe_distance = optimize_lines(
+        fringes, regularizer_max_dev=OPTIMIZE_REGULARIZER_MAX_DEV, track=False
+    )
 
     # Actualizar valor de rotación estimada
     angle_rotated = angle_rotated - np.rad2deg(np.arctan(slope))

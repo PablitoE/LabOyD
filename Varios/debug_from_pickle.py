@@ -86,12 +86,23 @@ if debug_failed_rotation:
 # Debugging failed interfringe
 if debug_failed_interfringe:
     with open("debug_failed_interfringe.pkl", "rb") as f:
+        cnt_ims = 0
+        while True:
+            try:
+                data = pickle.load(f)
+                cnt_ims += 1
+            except EOFError:
+                break
+
+    with open("debug_failed_interfringe.pkl", "rb") as f:
+        cnt = 1
         while True:
             try:
                 data = pickle.load(f)
             except EOFError:
                 break
 
+            print(f"Imagen {cnt} de {cnt_ims}")
             interferogram = data["interferogram"]
             debugging_info = data["debugging_info"]
             # from scipy.ndimage import rotate
