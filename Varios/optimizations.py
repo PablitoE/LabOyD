@@ -134,15 +134,20 @@ def proportionality_with_uncertainties(x, y, ux, uy):
 
 
 class OptimizerState:
-    def __init__(self, objective_function, args=(), track_cost_function=False, regularization_parameter=0.0):
+
+    def __init__(
+        self, objective_function, args=(), track_optimization=False, regularization_parameter=0.0, parameter_names=None
+    ):
         self.lambda_history = []
         self.iteration = 0
         self.fun_history = []
+        self.x_history = []
         self.reg_lambda = regularization_parameter
-        self.track_cost_function = track_cost_function
+        self.track_optimization = track_optimization
         self.objective_function = objective_function
         self.args = args
         self.this_iteration_evals = []
+        self.parameter_names = parameter_names
 
     @property
     def reg_lambda(self):
@@ -167,28 +172,45 @@ class OptimizerState:
         values_cost_this_iteration = np.array([[loss, p, f] for _, loss, p, f in self.this_iteration_evals])
         values_cost_current = values_cost_this_iteration[values_cost_this_iteration[:, 2] == intermediate_result.fun]
 
-        if self.track_cost_function:
+        if self.track_optimization:
             self.fun_history.append(values_cost_current)
+            self.x_history.append(np.copy(intermediate_result.x))
         self.this_iteration_evals = []
 
     def plot_history(self):
-        if self.track_cost_function:
+        if self.track_optimization:
             fun_history = np.concatenate(self.fun_history, axis=0)
             loss_proportion = fun_history[:, 0] / fun_history[:, 2]
             penalty_proportion = fun_history[:, 1] / fun_history[:, 2]
-            fig, axs = plt.subplots(1, 2, figsize=(16, 6))
+            x_history = np.array(self.x_history)
+            x_mins = np.min(x_history, axis=0)
+            x_maxs = np.max(x_history, axis=0)
+            x_history = (x_history - x_mins) / (x_maxs - x_mins + 1e-12)
+
+            fig, axs = plt.subplots(1, 3, figsize=(16, 6))
             axs[0].plot(fun_history[:, 2], label='Objective Function Value')
-            for lambda_point in self.lambda_history:
-                axs[0].axvline(x=lambda_point[0], color='r', linestyle='--', alpha=0.5,
-                               label=f'Lambda = {lambda_point[1]:.3f}')
             axs[0].set_xlabel('Iteration')
             axs[0].set_ylabel('Objective Function Value')
             axs[0].set_title('Objective Function History')
-            axs[0].legend()
             axs[1].plot(loss_proportion, label='Loss Proportion')
             axs[1].plot(penalty_proportion, label='Penalty Proportion')
             axs[1].set_xlabel('Iteration')
             axs[1].set_ylabel('Proportion')
             axs[1].set_title('Loss and Penalty Proportions')
             axs[1].legend()
+            axs[2].plot(x_history)
+            axs[2].set_xlabel('Iteration')
+            axs[2].set_ylabel('Parameter Values Normalized')
+            axs[2].set_title('Parameter History')
+            if self.parameter_names is None:
+                self.parameter_names = [f'Param {i}' for i in range(x_history.shape[1])]
+            legend_2 = []
+            for i in range(x_history.shape[1]):
+                legend_2.append(f'{self.parameter_names[i]}. MIN: {x_mins[i]:.3f}, MAX: {x_maxs[i]:.3f}')
+            axs[2].legend(legend_2)
+            for ax in axs:
+                for lambda_point in self.lambda_history:
+                    ax.axvline(x=lambda_point[0], color='r', linestyle='--', alpha=0.5,
+                               label=f'Lambda = {lambda_point[1]:.3f}')
+            axs[0].legend()
             plt.show()

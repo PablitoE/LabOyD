@@ -260,14 +260,14 @@ if __name__ == "__main__":
             )
             error_arrows = arrows_all - simulated_arrows_px
             error_arrows_rmse_by_interfringe = np.sqrt(np.mean(error_arrows**2, axis=0))
+            error_arrows_rel = error_arrows / simulated_arrows_px
             axs[0].plot(range(1, N_IMS_PER_SAMPLE + 1), error_arrows_rmse_by_interfringe, 'o-')
             axs[0].boxplot(error_arrows, positions=range(1, N_IMS_PER_SAMPLE + 1))
             axs[0].set_xlabel(f'Número de interferograma ({MIN_N_FRINGES} a {MAX_N_FRINGES} franjas)')
             axs[0].set_ylabel('Error en la estimación de flecha (píxeles)')
-            axs[1].plot(simulated_deviation_nm, np.linalg.norm(error_arrows, axis=1), 'o')
+            axs[1].plot(simulated_deviation_nm, np.sqrt(np.mean(error_arrows_rel**2, axis=1)), 'o')
             axs[1].set_xlabel('Desviación máxima simulada (nm)')
-            axs[1].set_ylabel('Error RMSE en la estimación de flecha (píxeles)')
-            error_arrows_rel = error_arrows / simulated_arrows_px
+            axs[1].set_ylabel('RMSE en la estimación de flecha (relativo a la flecha simulada)')
             for ax in axs:
                 ax.grid(True)
             fig_error_arrows.savefig(os.path.join(SAVE_PATH, f"{date}_error_flechas.png"))

@@ -42,12 +42,14 @@ REQUIRED_IMS = 10
 RESULTS_DIR = "results"
 IQR_FACTOR_IMS = 1.0
 IQR_FACTOR_POINTS_IN_FRINGES = 3.0
-OPTIMIZE_REGULARIZER_MAX_DEV = 0.03
+OPTIMIZE_REGULARIZER_MAX_DEV = 0.15
+UNCERTAINTY_MAX_DISTANCE_PX = 5
 
 SHOW_ALL = False
 SHOW_EACH_RESULT = False
 SAVE_RESULTS = True
 PLOT_CIRCLES_DEBUG = False
+TRACK_OPTIMIZATION = False
 
 # Ruta de tu imagen o directorio con imágenes que comienzan con un número
 image_path = r"/home/pablo/OneDrive/Documentos/INTI-Calibraciones/Planos/LMD 2025/Imágenes/TOP"  # noqa: E501
@@ -307,7 +309,8 @@ def optimize_lines(fringes, regularizer_max_dev=0, track=False):
             penalty = 0
         return loss, penalty
 
-    state = OptimizerState(mse, (fringes, ), regularization_parameter=0.0, track_cost_function=track)
+    state = OptimizerState(mse, (fringes, ), regularization_parameter=0.0, track_optimization=track,
+                           parameter_names=['slope', 'interfringe_y', 'first_intercept'])
 
     initial_guess = np.zeros(3)
     bounds = [(None, None), (0, 10000), (0, 10000)]
@@ -669,7 +672,7 @@ def analyze_interference(image_path=None, image_array=None, show=SHOW_ALL,
 
     # Ajustar franjas con rectas
     slope, intercepts, interfringe_distance = optimize_lines(
-        fringes, regularizer_max_dev=OPTIMIZE_REGULARIZER_MAX_DEV, track=False
+        fringes, regularizer_max_dev=OPTIMIZE_REGULARIZER_MAX_DEV, track=TRACK_OPTIMIZATION
     )
 
     # Actualizar valor de rotación estimada
@@ -705,7 +708,7 @@ def analyze_interference(image_path=None, image_array=None, show=SHOW_ALL,
             #     show_result = True  # Forzar ploteo si RMSD es muy alto
     total_distances = max_distance_positive['value'] - max_distance_negative['value']
     max_total_distance = np.max(total_distances).astype(float)
-    error_max_distance = 0.5  # np.std(total_distances) / np.sqrt(len(total_distances))
+    error_max_distance = UNCERTAINTY_MAX_DISTANCE_PX  # np.std(total_distances) / np.sqrt(len(total_distances))
     flecha = ufloat(max_total_distance, error_max_distance)
     logging.info("Desviación máxima de la recta: %s (k=1)", flecha)
     if debugging_info is not None and "valley_curves" in debugging_info.keys():
