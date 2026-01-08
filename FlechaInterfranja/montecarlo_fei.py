@@ -13,6 +13,7 @@ from Varios.plot import boxplot_by_bins
 
 
 BASE_SEED = 50
+GENERATE_DEBUG_INFO = False
 logger = logging.getLogger(__name__)
 
 
@@ -58,18 +59,21 @@ def worker(sim_id, simulated_deviation_nm, generator=None):
                                                       debugging_info=debugging_info)
 
         # Debugging
-        interfringe_error = interfringe.n - 1 / generator.current_frequency
-        if abs(interfringe_error) > 2:
-            with open("debug_failed_interfringe.pkl", "ab+") as f:
-                data_to_save = {
-                    "interferogram": interferogram,
-                    "debugging_info": debugging_info
-                }
-                pickle.dump(data_to_save, f)
-                # logging.critical("Interfringe error: %f. STOP. Image saved", interfringe_error)
-                # quit()
-        # else:
-        # logging.critical("Interfringe error: %f", interfringe_error)
+        if GENERATE_DEBUG_INFO:
+            if SIMULATION_MODE in ["random", "random_maxfixed"]:
+                simulated_deviation_nm = generator.current_maximum_deviation_nm
+            simulated_arrow_px = simulated_deviation_nm / WAVELENGTH_NM * 2 / generator.current_frequency
+            debugging_info["arrow"] = arrow
+            debugging_info["simulated_arrow_px"] = simulated_arrow_px
+            error_arrow_rel = np.abs(arrow.n - simulated_arrow_px) / simulated_arrow_px
+
+            if abs(error_arrow_rel) > 0.6:
+                with open("debug_failed_arrow.pkl", "ab+") as f:
+                    data_to_save = {
+                        "interferogram": interferogram,
+                        "debugging_info": debugging_info
+                    }
+                    pickle.dump(data_to_save, f)
 
         arrows.append(arrow)
         interfringes.append(interfringe)

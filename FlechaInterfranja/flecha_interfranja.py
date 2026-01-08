@@ -16,6 +16,7 @@ import logging
 from datetime import datetime
 from Varios.optimizations import encontrar_maximo_cuadratica, proportionality_with_uncertainties, OptimizerState
 from Varios.lines_points import associate_two_sets_of_lines, rotate_2d_points
+from Varios.images import log_normalize
 
 
 WAVELENGTH_NM = 633
@@ -583,13 +584,19 @@ def analyze_interference(image_path=None, image_array=None, show=SHOW_ALL,
     circle_right = center_x + radius - MINIMUM_DISTANCE_FROM_EDGES
     peaks = [peak for peak in peaks if circle_left < peak < circle_right]
 
-    # Generar un normalizador
-    normalizador = obtener_gaussiana_2D(blurred)
-    normalizador = enmascarar_imagen(normalizador, center_x, center_y, radius)
-
     # Analizar cada franja en una imagen blurreada, normalizada y enmascarada
+    blurred_for_analysis = log_normalize(blurred_for_analysis, GAUSSIAN_BLUR_SIGMA_CIRCLE)
     blur_masked = enmascarar_imagen(blurred_for_analysis, center_x, center_y, radius)
-    blur_masked = blur_masked / normalizador
+
+    if show:
+        fig, axs = plt.subplots(1, 3, figsize=(18, 6))
+        axs[0].imshow(blurred_for_analysis, cmap='gray')
+        axs[0].set_title("Imagen Blurreada")
+        axs[1].imshow(blurred, cmap='gray')
+        axs[1].set_title("Imagen Blurreada para Círculo")
+        axs[2].imshow(blur_masked, cmap='gray')
+        axs[2].set_title("Imagen Blurreada y Normalizada")
+        plt.show()
 
     # Encontrar puntos de cada franja
     x_positions, y_positions = [], []
@@ -708,6 +715,7 @@ def analyze_interference(image_path=None, image_array=None, show=SHOW_ALL,
             #     show_result = True  # Forzar ploteo si RMSD es muy alto
     total_distances = max_distance_positive['value'] - max_distance_negative['value']
     max_total_distance = np.max(total_distances).astype(float)
+    fringe_with_max_deviation = np.argmax(total_distances)
     error_max_distance = UNCERTAINTY_MAX_DISTANCE_PX  # np.std(total_distances) / np.sqrt(len(total_distances))
     flecha = ufloat(max_total_distance, error_max_distance)
     logging.info("Desviación máxima de la recta: %s (k=1)", flecha)
@@ -715,30 +723,32 @@ def analyze_interference(image_path=None, image_array=None, show=SHOW_ALL,
         debugging_info["rmsd_to_valley_curves"] = np.mean(rmsd_to_valley_curves)
 
     # Ploteo de los mínimos detectados en la imagen original
-    colores = ['r', 'g', 'b']
-    plt.figure(figsize=(12, 8))
-    plt.title("Franjas detectadas en la Imagen")
-    plt.imshow(blur_masked, cmap='gray')
-    for i, fringe in enumerate(fringes):
-        good_ones = mask_outliers[i]
-        good_ones_dots = fringe[good_ones]
-        plt.plot(good_ones_dots[:, 0], good_ones_dots[:, 1], 'o',
-                 color=colores[i % len(colores)], label=f'Franja #{i}')
-        plt.plot(good_ones_dots[max_distance_positive[i]['index'], 0],
-                 good_ones_dots[max_distance_positive[i]['index'], 1], 'o', color=colores[i % len(colores)],
-                 markersize=10)
-        plt.plot(good_ones_dots[max_distance_negative[i]['index'], 0],
-                 good_ones_dots[max_distance_negative[i]['index'], 1], 'o', color=colores[i % len(colores)],
-                 markersize=10)
-        plt.plot(fringe[~good_ones, 0], fringe[~good_ones, 1], 'x',
-                 color=colores[i % len(colores)])
-        x_fit = slope * fringe[:, 1] + intercepts[i]
-        plt.plot(x_fit, fringe[:, 1], color=colores[i % len(colores)], linestyle='--')
-        if debugging_info is not None and "valley_curves" in debugging_info.keys():
-            valley_curve = rotated_valley_curves[fringe_index_in_valley_curves[i]]
-            plt.plot(valley_curve[:, 1], valley_curve[:, 0], color=colores[i % len(colores)],
-                     linestyle=':', linewidth=1.5)
-    plt.legend()
+    if save or show_result:
+        colores = ['r', 'g', 'b']
+        plt.figure(figsize=(12, 8))
+        plt.title("Franjas detectadas en la Imagen")
+        plt.imshow(blur_masked, cmap='gray')
+        for i, fringe in enumerate(fringes):
+            good_ones = mask_outliers[i]
+            good_ones_dots = fringe[good_ones]
+            plt.plot(good_ones_dots[:, 0], good_ones_dots[:, 1], 'o',
+                     color=colores[i % len(colores)], label=f'Franja #{i}')
+            marker_max = '*' if i == fringe_with_max_deviation else 'o'
+            plt.plot(good_ones_dots[max_distance_positive[i]['index'], 0],
+                     good_ones_dots[max_distance_positive[i]['index'], 1], marker_max, color=colores[i % len(colores)],
+                     markersize=10)
+            plt.plot(good_ones_dots[max_distance_negative[i]['index'], 0],
+                     good_ones_dots[max_distance_negative[i]['index'], 1], marker_max, color=colores[i % len(colores)],
+                     markersize=10)
+            plt.plot(fringe[~good_ones, 0], fringe[~good_ones, 1], 'x',
+                     color=colores[i % len(colores)])
+            x_fit = slope * fringe[:, 1] + intercepts[i]
+            plt.plot(x_fit, fringe[:, 1], color=colores[i % len(colores)], linestyle='--')
+            if debugging_info is not None and "valley_curves" in debugging_info.keys():
+                valley_curve = rotated_valley_curves[fringe_index_in_valley_curves[i]]
+                plt.plot(valley_curve[:, 1], valley_curve[:, 0], color=colores[i % len(colores)],
+                         linestyle=':', linewidth=1.5)
+        plt.legend()
     if save:
         output_dir = os.path.join(os.path.dirname(image_path), RESULTS_DIR)
         os.makedirs(output_dir, exist_ok=True)
@@ -746,7 +756,8 @@ def analyze_interference(image_path=None, image_array=None, show=SHOW_ALL,
         plt.savefig(os.path.join(output_dir, f"{file_name}.svg"))
     if show_result:
         plt.show()
-    plt.close()
+    if save or show_result:
+        plt.close()
 
     return interfringe_distance, flecha
 

@@ -7,7 +7,7 @@ from FlechaInterfranja.flecha_interfranja import search_points_in_valley, analyz
 debug_fringe_search = False
 debug_circle_detection = False
 debug_failed_rotation = False
-debug_failed_interfringe = True
+debug_failed_interferogram = True
 
 # Debugging fringe search
 if debug_fringe_search:
@@ -83,9 +83,10 @@ if debug_failed_rotation:
     plt.imshow(img_rotada, cmap='gray')
     plt.show()
 
-# Debugging failed interfringe
-if debug_failed_interfringe:
-    with open("debug_failed_interfringe.pkl", "rb") as f:
+# Debugging failed interferogram analysis
+filename = "debug_failed_arrow.pkl"
+if debug_failed_interferogram:
+    with open(filename, "rb") as f:
         cnt_ims = 0
         while True:
             try:
@@ -94,7 +95,7 @@ if debug_failed_interfringe:
             except EOFError:
                 break
 
-    with open("debug_failed_interfringe.pkl", "rb") as f:
+    with open(filename, "rb") as f:
         cnt = 1
         while True:
             try:
@@ -108,6 +109,10 @@ if debug_failed_interfringe:
             # from scipy.ndimage import rotate
             # angle_deg_rotate = 10
             # interferogram = rotate(interferogram, angle_deg_rotate, mode='nearest', reshape=False)
+            print(
+                f"Arrow (px): {debugging_info['arrow']}, Simulated arrow (px): {debugging_info['simulated_arrow_px']}"
+            )
             interfringe, arrow = analyze_interference(image_array=interferogram, save=False,
-                                                      show_result=True, show=False,
+                                                      show_result=True, show=True,
                                                       debugging_info=debugging_info)
+            cnt += 1
