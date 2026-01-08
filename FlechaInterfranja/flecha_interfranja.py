@@ -289,7 +289,7 @@ def maximum_estimator_uniform(values, uncertainty_mode="std", confidence=0.95):
     return ufloat(max_estimation, u_estimation)
 
 
-def optimize_lines(fringes, regularizer_max_dev=0, track=False):
+def optimize_lines(fringes, regularizer_max_dev=0, track=False, n_largest_arrows=3):
     "Como las rectas son normalmente verticales, conviene usar un modelo: x = my + b"
     def mse(parameters, regularized_max_dev, fringes):
         slope = parameters[0]
@@ -298,14 +298,15 @@ def optimize_lines(fringes, regularizer_max_dev=0, track=False):
         n_fringes = len(fringes)
         intercepts = first_intercept + np.arange(n_fringes) * interfringe_y
         total_se = 0
-        all_distances = distances_sets_of_points_to_lines(fringes, slope, intercepts, signed=False)
+        all_distances = distances_sets_of_points_to_lines(fringes, slope, intercepts, signed=True)
         for distances in all_distances:
             total_se += np.sum(distances ** 2)
         total_points = np.sum([len(fringe) for fringe in fringes])
         loss = total_se / total_points
         if regularized_max_dev > 0:
-            max_dev = np.max([np.max(distances) for distances in all_distances])
-            penalty = regularized_max_dev * max_dev**2
+            arrows = np.array([np.max(distances) - np.min(distances) for distances in all_distances])
+            max_arrows = np.sort(arrows)[-n_largest_arrows:]  # Take the n largest arrows
+            penalty = regularized_max_dev * np.mean(max_arrows**2)
         else:
             penalty = 0
         return loss, penalty
