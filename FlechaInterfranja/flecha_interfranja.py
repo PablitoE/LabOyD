@@ -307,7 +307,7 @@ def optimize_lines(fringes, regularizer_max_dev=0, track=False, n_largest_arrows
         loss = total_se / total_points
         if regularized_max_dev > 0:
             arrows = np.array([np.max(distances) - np.min(distances) for distances in all_distances])
-            max_arrows = nlargest(n_largest_arrows, arrows)
+            max_arrows = np.asarray(nlargest(n_largest_arrows, arrows))
             penalty = regularized_max_dev * np.mean(max_arrows**2)
         else:
             penalty = 0
@@ -715,8 +715,9 @@ def analyze_interference(image_path=None, image_array=None, show=SHOW_ALL,
         if debugging_info is not None and "valley_curves" in debugging_info.keys():
             diffs = distances_fringes_to_valley[i][mask]
             rmsd_to_valley_curves[i] = np.sqrt(np.mean(diffs ** 2))
-            largest_distances_to_valley_curves = np.vstack((largest_distances_to_valley_curves,
-                                                            nlargest(N_LARGEST_DISTANCES_TO_VALLEY_CURVES, diffs)))
+            largest_distances_to_valley_curves = np.hstack(
+                (largest_distances_to_valley_curves, np.asarray(nlargest(N_LARGEST_DISTANCES_TO_VALLEY_CURVES, diffs)))
+            )
     total_distances = max_distance_positive['value'] - max_distance_negative['value']
     max_total_distance = np.max(total_distances).astype(float)
     fringe_with_max_deviation = np.argmax(total_distances)

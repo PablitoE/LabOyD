@@ -182,7 +182,8 @@ if __name__ == "__main__":
                     simulated_interfringe_spacings[i, :], measured_interfringe_spacings[i, :],
                     simulated_deviation_nm[i], measured_max_deviations[i], simulated_rotation[i, :],
                     error_rotation_estimation[i, :], error_rotation_estimation_corrected[i, :],
-                    mean_rms_distance_to_valley[i, :], arrows_all[i, :]
+                    mean_rms_distance_to_valley[i, :], arrows_all[i, :], max_distance_fringe_to_valley[i, :],
+                    avg_largest_distances_to_valley[i, :]
                 ) = results[i]
         else:
             generator = FlatInterferogramGenerator(shape=(1024, 1024),
@@ -202,7 +203,8 @@ if __name__ == "__main__":
                     simulated_interfringe_spacings[i, :], measured_interfringe_spacings[i, :],
                     simulated_deviation_nm[i], measured_max_deviations[i], simulated_rotation[i, :],
                     error_rotation_estimation[i, :], error_rotation_estimation_corrected[i, :],
-                    mean_rms_distance_to_valley[i, :], arrows_all[i, :]
+                    mean_rms_distance_to_valley[i, :], arrows_all[i, :], max_distance_fringe_to_valley[i, :],
+                    avg_largest_distances_to_valley[i, :]
                 ) = worker(i, simulated_deviation_nm[i], generator=generator)
 
         if PLOT_RESULTS:
