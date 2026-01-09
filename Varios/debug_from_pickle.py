@@ -112,7 +112,35 @@ if debug_failed_interferogram:
             print(
                 f"Arrow (px): {debugging_info['arrow']}, Simulated arrow (px): {debugging_info['simulated_arrow_px']}"
             )
-            interfringe, arrow = analyze_interference(image_array=interferogram, save=False,
-                                                      show_result=True, show=True,
-                                                      debugging_info=debugging_info)
+            N_REGULARIZERS = 20
+            arrows = np.zeros(N_REGULARIZERS)
+            interfringes = np.zeros(N_REGULARIZERS)
+            regularizers = np.logspace(-2, 1, N_REGULARIZERS)
+            for k_reg, reg_param in enumerate(regularizers):
+                interfringe, arrow = analyze_interference(
+                    image_array=interferogram, save=False, show_result=False, show=False, debugging_info=debugging_info,
+                    regularizer_parameter=reg_param,
+                )
+                interfringes[k_reg] = interfringe.n  # ufloat to float
+                arrows[k_reg] = arrow.n  # ufloat to float
+
+            fig, axs = plt.subplots(1, 2, figsize=(12, 5))
+            axs[0].semilogx(regularizers, interfringes, marker='o')
+            axs[0].set_xlabel("Regularizer parameter")
+            axs[0].set_ylabel("Interfringe distance (px)")
+            axs[0].set_title("Interfringe distance vs Regularizer parameter")
+            axs[0].axhline(
+                debugging_info["simulated_interfringe_spacing"], color='red', linestyle='--',
+                label='Simulated interfringe',
+            )
+            axs[0].legend()
+            axs[1].semilogx(regularizers, arrows, marker='o', color='orange')
+            axs[1].set_xlabel("Regularizer parameter")
+            axs[1].set_ylabel("Arrow (px)")
+            axs[1].set_title("Arrow vs Regularizer parameter")
+            axs[1].axhline(debugging_info["simulated_arrow_px"], color='red', linestyle='--', label='Simulated arrow')
+            axs[1].legend()
+            plt.suptitle(f"Debugging interferogram {cnt}")
+            plt.show()
+
             cnt += 1

@@ -484,7 +484,8 @@ def plot_minima_profile(profile, minima_indices):
 
 def analyze_interference(image_path=None, image_array=None, show=SHOW_ALL,
                          show_result=SHOW_EACH_RESULT, save=SAVE_RESULTS,
-                         debugging_info=None) -> Tuple[ufloat, ufloat]:
+                         debugging_info=None, regularizer_parameter=OPTIMIZE_REGULARIZER_MAX_DEV
+                         ) -> Tuple[ufloat, ufloat]:
     assert image_path is not None or image_array is not None
     date = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
@@ -682,7 +683,7 @@ def analyze_interference(image_path=None, image_array=None, show=SHOW_ALL,
 
     # Ajustar franjas con rectas
     slope, intercepts, interfringe_distance = optimize_lines(
-        fringes, regularizer_max_dev=OPTIMIZE_REGULARIZER_MAX_DEV, track=TRACK_OPTIMIZATION
+        fringes, regularizer_max_dev=regularizer_parameter, track=TRACK_OPTIMIZATION
     )
 
     # Actualizar valor de rotación estimada

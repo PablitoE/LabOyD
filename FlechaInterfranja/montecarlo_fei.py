@@ -12,8 +12,8 @@ from tqdm import tqdm
 from Varios.plot import boxplot_by_bins
 
 
-BASE_SEED = 50
-GENERATE_DEBUG_INFO = False
+BASE_SEED = 40
+GENERATE_DEBUG_INFO = True
 logger = logging.getLogger(__name__)
 
 
@@ -67,9 +67,9 @@ def worker(sim_id, simulated_deviation_nm, generator=None):
             simulated_arrow_px = simulated_deviation_nm / WAVELENGTH_NM * 2 / generator.current_frequency
             debugging_info["arrow"] = arrow
             debugging_info["simulated_arrow_px"] = simulated_arrow_px
-            error_arrow_rel = np.abs(arrow.n - simulated_arrow_px) / simulated_arrow_px
+            error_arrow = np.abs(arrow.n - simulated_arrow_px)
 
-            if abs(error_arrow_rel) > 0.6:
+            if abs(error_arrow) > 7.5:
                 with open("debug_failed_arrow.pkl", "ab+") as f:
                     data_to_save = {
                         "interferogram": interferogram,
@@ -120,7 +120,7 @@ def worker(sim_id, simulated_deviation_nm, generator=None):
 
 
 if __name__ == "__main__":
-    MULTIPROCESSING = True
+    MULTIPROCESSING = False
     SAVE_PATH = "Data/Resultados/MonteCarloFEI"
     LOAD_FILENAME = ""
     logging.basicConfig(
@@ -131,7 +131,7 @@ if __name__ == "__main__":
                   logging.StreamHandler()]
     )
 
-    N_MC_SAMPLES = 200
+    N_MC_SAMPLES = 10
     N_IMS_PER_SAMPLE = 10
     MIN_N_FRINGES = 12
     MAX_N_FRINGES = 26
