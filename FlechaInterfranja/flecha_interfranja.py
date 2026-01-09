@@ -14,6 +14,7 @@ import os
 import re
 import logging
 from datetime import datetime
+from heapq import nlargest
 from Varios.optimizations import encontrar_maximo_cuadratica, proportionality_with_uncertainties, OptimizerState
 from Varios.lines_points import associate_two_sets_of_lines, rotate_2d_points
 from Varios.images import log_normalize
@@ -45,6 +46,7 @@ IQR_FACTOR_IMS = 1.0
 IQR_FACTOR_POINTS_IN_FRINGES = 3.0
 OPTIMIZE_REGULARIZER_MAX_DEV = 0.15
 UNCERTAINTY_MAX_DISTANCE_PX = 5
+N_LARGEST_DISTANCES_TO_VALLEY_CURVES = 5
 
 SHOW_ALL = False
 SHOW_EACH_RESULT = False
@@ -305,7 +307,7 @@ def optimize_lines(fringes, regularizer_max_dev=0, track=False, n_largest_arrows
         loss = total_se / total_points
         if regularized_max_dev > 0:
             arrows = np.array([np.max(distances) - np.min(distances) for distances in all_distances])
-            max_arrows = np.sort(arrows)[-n_largest_arrows:]  # Take the n largest arrows
+            max_arrows = nlargest(n_largest_arrows, arrows)
             penalty = regularized_max_dev * np.mean(max_arrows**2)
         else:
             penalty = 0
@@ -698,6 +700,7 @@ def analyze_interference(image_path=None, image_array=None, show=SHOW_ALL,
     max_distance_negative = np.zeros(len(all_distances), dtype=[('index', int), ('value', float)])
     if debugging_info is not None and "valley_curves" in debugging_info.keys():
         rmsd_to_valley_curves = np.zeros(len(all_distances))
+        largest_distances_to_valley_curves = np.array([])
     mask_outliers = []
     for i, distances in enumerate(all_distances):
         mask = eliminar_outliers_iqr(
@@ -712,8 +715,8 @@ def analyze_interference(image_path=None, image_array=None, show=SHOW_ALL,
         if debugging_info is not None and "valley_curves" in debugging_info.keys():
             diffs = distances_fringes_to_valley[i][mask]
             rmsd_to_valley_curves[i] = np.sqrt(np.mean(diffs ** 2))
-            # if rmsd_to_valley_curves[i] > 5:
-            #     show_result = True  # Forzar ploteo si RMSD es muy alto
+            largest_distances_to_valley_curves = np.vstack((largest_distances_to_valley_curves,
+                                                            nlargest(N_LARGEST_DISTANCES_TO_VALLEY_CURVES, diffs)))
     total_distances = max_distance_positive['value'] - max_distance_negative['value']
     max_total_distance = np.max(total_distances).astype(float)
     fringe_with_max_deviation = np.argmax(total_distances)
@@ -722,6 +725,10 @@ def analyze_interference(image_path=None, image_array=None, show=SHOW_ALL,
     logging.info("Desviación máxima de la recta: %s (k=1)", flecha)
     if debugging_info is not None and "valley_curves" in debugging_info.keys():
         debugging_info["rmsd_to_valley_curves"] = np.mean(rmsd_to_valley_curves)
+        debugging_info["avg_largest_distances_to_valley_curves"] = np.mean(
+            nlargest(N_LARGEST_DISTANCES_TO_VALLEY_CURVES, largest_distances_to_valley_curves)
+        )
+        debugging_info["max_distance_fringe_to_valley_curve"] = np.max(largest_distances_to_valley_curves)
 
     # Ploteo de los mínimos detectados en la imagen original
     if save or show_result:

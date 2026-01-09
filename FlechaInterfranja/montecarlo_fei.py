@@ -43,6 +43,8 @@ def worker(sim_id, simulated_deviation_nm, generator=None):
     error_rotation_estimation_corrected = np.zeros(N_IMS_PER_SAMPLE)
     mean_rms_distance_to_valley = np.zeros(N_IMS_PER_SAMPLE)
     simulated_rotation_angle = np.zeros(N_IMS_PER_SAMPLE)
+    max_distance_fringe_to_valley = np.zeros(N_IMS_PER_SAMPLE)
+    avg_largest_distances_to_valley = np.zeros(N_IMS_PER_SAMPLE)
     generator.prepare_next_generation(mode=SIMULATION_MODE, gaussian_max_deviation=simulated_deviation_nm)
     for k_interferogram, interferogram in enumerate(generator.generate(
         num_samples=N_IMS_PER_SAMPLE, output_mode="array", simulation_mode=SIMULATION_MODE,
@@ -84,6 +86,8 @@ def worker(sim_id, simulated_deviation_nm, generator=None):
             generator.current_rotation_angle + debugging_info["rotation_angle_estimated_corrected"]
         )
         mean_rms_distance_to_valley[k_interferogram] = debugging_info["rmsd_to_valley_curves"]
+        max_distance_fringe_to_valley[k_interferogram] = debugging_info["max_distance_fringe_to_valley_curve"]
+        avg_largest_distances_to_valley[k_interferogram] = debugging_info["avg_largest_distances_to_valley_curves"]
     arrows = nominal_values(arrows)
     measured_interfringe_spacings = nominal_values(interfringes)
     measured_interfringe_spacings_std = std_devs(interfringes)
@@ -111,7 +115,7 @@ def worker(sim_id, simulated_deviation_nm, generator=None):
         simulated_interfringe_spacings, measured_interfringe_spacings,
         simulated_deviation_nm, measured_max_deviation, simulated_rotation_angle,
         error_rotation_estimation, error_rotation_estimation_corrected,
-        mean_rms_distance_to_valley, arrows
+        mean_rms_distance_to_valley, arrows, max_distance_fringe_to_valley, avg_largest_distances_to_valley
     )
 
 
@@ -164,6 +168,8 @@ if __name__ == "__main__":
         error_rotation_estimation = np.zeros((N_MC_SAMPLES, N_IMS_PER_SAMPLE))
         error_rotation_estimation_corrected = np.zeros((N_MC_SAMPLES, N_IMS_PER_SAMPLE))
         mean_rms_distance_to_valley = np.zeros((N_MC_SAMPLES, N_IMS_PER_SAMPLE))
+        max_distance_fringe_to_valley = np.zeros((N_MC_SAMPLES, N_IMS_PER_SAMPLE))
+        avg_largest_distances_to_valley = np.zeros((N_MC_SAMPLES, N_IMS_PER_SAMPLE))
         arrows_all = np.zeros((N_MC_SAMPLES, N_IMS_PER_SAMPLE))
 
         if MULTIPROCESSING:
@@ -257,6 +263,23 @@ if __name__ == "__main__":
             for ax in axs.flatten():
                 ax.grid(True)
             fig_error_rot_valles.savefig(os.path.join(SAVE_PATH, f"{date}_error_rotacion_valles.png"))
+
+            fig_distances_valley, axs = plt.subplots(2, 2, figsize=(16, 10))
+            axs[0, 0].boxplot(max_distance_fringe_to_valley, positions=range(1, N_IMS_PER_SAMPLE + 1))
+            axs[0, 0].set_xlabel(f'Número de interferograma ({MIN_N_FRINGES} a {MAX_N_FRINGES} franjas)')
+            axs[0, 0].set_ylabel('Máxima distancia de franja a curva valle (píxeles)')
+            axs[0, 1].plot(simulated_deviation_nm, np.max(max_distance_fringe_to_valley, axis=1), 'o')
+            axs[0, 1].set_xlabel('Desviación máxima simulada (nm)')
+            axs[0, 1].set_ylabel('Máxima distancia de franja a curva valle (píxeles)')
+            axs[1, 0].boxplot(avg_largest_distances_to_valley, positions=range(1, N_IMS_PER_SAMPLE + 1))
+            axs[1, 0].set_xlabel(f'Número de interferograma ({MIN_N_FRINGES} a {MAX_N_FRINGES} franjas)')
+            axs[1, 0].set_ylabel('Promedio de las mayores distancias de franja a curva valle (píxeles)')
+            axs[1, 1].plot(simulated_deviation_nm, np.mean(avg_largest_distances_to_valley, axis=1), 'o')
+            axs[1, 1].set_xlabel('Desviación máxima simulada (nm)')
+            axs[1, 1].set_ylabel('Promedio de las mayores distancias de franja a curva valle (píxeles)')
+            for ax in axs.flatten():
+                ax.grid(True)
+            fig_distances_valley.savefig(os.path.join(SAVE_PATH, f"{date}_distancias_valles.png"))
 
             fig_error_arrows, axs = plt.subplots(1, 2, figsize=(16, 6))
             simulated_arrows_px = (
