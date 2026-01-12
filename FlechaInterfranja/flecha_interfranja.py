@@ -14,7 +14,7 @@ import os
 import re
 import logging
 from datetime import datetime
-from heapq import nlargest
+from heapq import nlargest, nsmallest
 from Varios.optimizations import encontrar_maximo_cuadratica, proportionality_with_uncertainties, OptimizerState
 from Varios.lines_points import associate_two_sets_of_lines, rotate_2d_points
 from Varios.images import log_normalize
@@ -43,10 +43,11 @@ MAX_NUMBER_POINTS_FIT = 7
 REQUIRED_IMS = 10
 RESULTS_DIR = "results"
 IQR_FACTOR_IMS = 1.0
-IQR_FACTOR_POINTS_IN_FRINGES = 3.0
+IQR_FACTOR_POINTS_IN_FRINGES = 3.5
 OPTIMIZE_REGULARIZER_MAX_DEV = 0.15
 UNCERTAINTY_MAX_DISTANCE_PX = 5
 N_LARGEST_DISTANCES_TO_VALLEY_CURVES = 5
+N_LARGEST_DISTANCES_FOR_ARROW = 3
 
 SHOW_ALL = False
 SHOW_EACH_RESULT = False
@@ -484,7 +485,8 @@ def plot_minima_profile(profile, minima_indices):
 
 def analyze_interference(image_path=None, image_array=None, show=SHOW_ALL,
                          show_result=SHOW_EACH_RESULT, save=SAVE_RESULTS,
-                         debugging_info=None, regularizer_parameter=OPTIMIZE_REGULARIZER_MAX_DEV
+                         debugging_info=None, regularizer_parameter=OPTIMIZE_REGULARIZER_MAX_DEV,
+                         n_largest_distances_for_arrow=N_LARGEST_DISTANCES_FOR_ARROW
                          ) -> Tuple[ufloat, ufloat]:
     assert image_path is not None or image_array is not None
     date = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
@@ -699,6 +701,8 @@ def analyze_interference(image_path=None, image_array=None, show=SHOW_ALL,
     )
     max_distance_positive = np.zeros(len(all_distances), dtype=[('index', int), ('value', float)])
     max_distance_negative = np.zeros(len(all_distances), dtype=[('index', int), ('value', float)])
+    rms_n_max_distances = np.zeros(len(all_distances))
+
     if debugging_info is not None and "valley_curves" in debugging_info.keys():
         rmsd_to_valley_curves = np.zeros(len(all_distances))
         largest_distances_to_valley_curves = np.array([])
@@ -709,6 +713,13 @@ def analyze_interference(image_path=None, image_array=None, show=SHOW_ALL,
         )
         distances = distances[mask]
         mask_outliers.append(mask)
+        if n_largest_distances_for_arrow > 1:
+            n_max_distances_positive = np.asarray(nlargest(n_largest_distances_for_arrow, distances))
+            n_max_distances_negative = np.asarray(nsmallest(n_largest_distances_for_arrow, distances))
+            distances_matrix = n_max_distances_positive[:, np.newaxis] - n_max_distances_negative[np.newaxis, :]
+            distances_matrix_upper_triangle = distances_matrix[np.triu_indices_from(distances_matrix, k=0)]
+            rms_n_max_distances[i] = np.sqrt(np.mean(distances_matrix_upper_triangle**2))
+
         max_distance_positive[i]['index'] = np.argmax(distances)
         max_distance_negative[i]['index'] = np.argmin(distances)
         max_distance_positive[i]['value'] = distances[max_distance_positive[i]['index']]
@@ -720,11 +731,14 @@ def analyze_interference(image_path=None, image_array=None, show=SHOW_ALL,
                 (largest_distances_to_valley_curves, np.asarray(nlargest(N_LARGEST_DISTANCES_TO_VALLEY_CURVES, diffs)))
             )
     total_distances = max_distance_positive['value'] - max_distance_negative['value']
-    max_total_distance = np.max(total_distances).astype(float)
+    if n_largest_distances_for_arrow == 1:
+        arrow_value = np.max(total_distances).astype(float)
+    else:
+        arrow_value = np.max(rms_n_max_distances).astype(float)
     fringe_with_max_deviation = np.argmax(total_distances)
     error_max_distance = UNCERTAINTY_MAX_DISTANCE_PX  # np.std(total_distances) / np.sqrt(len(total_distances))
-    flecha = ufloat(max_total_distance, error_max_distance)
-    logging.info("Desviación máxima de la recta: %s (k=1)", flecha)
+    arrow = ufloat(arrow_value, error_max_distance)
+    logging.info("Desviación máxima de la recta: %s (k=1)", arrow)
     if debugging_info is not None and "valley_curves" in debugging_info.keys():
         debugging_info["rmsd_to_valley_curves"] = np.mean(rmsd_to_valley_curves)
         debugging_info["avg_largest_distances_to_valley_curves"] = np.mean(
@@ -769,7 +783,7 @@ def analyze_interference(image_path=None, image_array=None, show=SHOW_ALL,
     if save or show_result:
         plt.close()
 
-    return interfringe_distance, flecha
+    return interfringe_distance, arrow
 
 
 def analisis_flechas_interfranjas(flechas, interfranjas, iqr_factor=0.75, full_output=True, uncertainties=None):

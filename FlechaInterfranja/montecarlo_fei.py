@@ -12,8 +12,8 @@ from tqdm import tqdm
 from Varios.plot import boxplot_by_bins
 
 
-BASE_SEED = 40
-GENERATE_DEBUG_INFO = True
+BASE_SEED = 50
+GENERATE_DEBUG_INFO = False
 logger = logging.getLogger(__name__)
 
 
@@ -62,6 +62,8 @@ def worker(sim_id, simulated_deviation_nm, generator=None):
 
         # Debugging
         if GENERATE_DEBUG_INFO:
+            DEBUG_ARROW = False
+            DEBUG_DISTANCE_TO_VALLEY = True
             if SIMULATION_MODE in ["random", "random_maxfixed"]:
                 simulated_deviation_nm = generator.current_maximum_deviation_nm
             simulated_arrow_px = simulated_deviation_nm / WAVELENGTH_NM * 2 / generator.current_frequency
@@ -69,8 +71,15 @@ def worker(sim_id, simulated_deviation_nm, generator=None):
             debugging_info["simulated_arrow_px"] = simulated_arrow_px
             error_arrow = np.abs(arrow.n - simulated_arrow_px)
 
-            if abs(error_arrow) > 7.5:
+            if abs(error_arrow) > 7.5 and DEBUG_ARROW:
                 with open("debug_failed_arrow.pkl", "ab+") as f:
+                    data_to_save = {
+                        "interferogram": interferogram,
+                        "debugging_info": debugging_info
+                    }
+                    pickle.dump(data_to_save, f)
+            if debugging_info["max_distance_fringe_to_valley_curve"] > 2.5 and DEBUG_DISTANCE_TO_VALLEY:
+                with open("debug_failed_distance_to_valley.pkl", "ab+") as f:
                     data_to_save = {
                         "interferogram": interferogram,
                         "debugging_info": debugging_info
@@ -120,7 +129,7 @@ def worker(sim_id, simulated_deviation_nm, generator=None):
 
 
 if __name__ == "__main__":
-    MULTIPROCESSING = False
+    MULTIPROCESSING = True
     SAVE_PATH = "Data/Resultados/MonteCarloFEI"
     LOAD_FILENAME = ""
     logging.basicConfig(
@@ -131,7 +140,7 @@ if __name__ == "__main__":
                   logging.StreamHandler()]
     )
 
-    N_MC_SAMPLES = 10
+    N_MC_SAMPLES = 200
     N_IMS_PER_SAMPLE = 10
     MIN_N_FRINGES = 12
     MAX_N_FRINGES = 26
