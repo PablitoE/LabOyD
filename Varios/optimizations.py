@@ -1,8 +1,9 @@
 import numpy as np
+import matplotlib.pyplot as plt
 from scipy.interpolate import make_splprep
 
 
-def encontrar_maximo_cuadratica(arr_x, arr_y=None, max_number_points=7, extreme="max"):
+def encontrar_maximo_cuadratica(arr_x, arr_y=None, max_number_points=7, extreme="max", show=False):
     """
     Encontrar el extremo de un array 1d que tiene forma de cuadrática
     ajustando un polinomio de orden 2
@@ -32,6 +33,9 @@ def encontrar_maximo_cuadratica(arr_x, arr_y=None, max_number_points=7, extreme=
 
     if np.all(arr_y == 0):
         return arr_x[len(arr_x) // 2], 0, 0.0
+
+    arr_x_original = arr_x.copy()
+    arr_y_original = arr_y.copy()
 
     # Limitar el número de puntos para el ajuste
     if extreme == "max":
@@ -78,6 +82,20 @@ def encontrar_maximo_cuadratica(arr_x, arr_y=None, max_number_points=7, extreme=
     extr_x = -b / (2 * a)
     extr_y = poly(extr_x)
 
+    # Plot para depuración
+    if show:
+        import matplotlib.pyplot as plt
+
+        x_fit = np.linspace(np.min(arr_x), np.max(arr_x), 100)
+        y_fit = poly(x_fit)
+
+        plt.plot(arr_x_original, arr_y_original, 'o', label='Datos')
+        plt.plot(x_fit, y_fit, '-', label='Ajuste cuadrático')
+        plt.plot(extr_x, extr_y, 'rx', label='Extremo encontrado')
+        plt.legend()
+        plt.title(f'Ajuste cuadrático (R² = {r_squared:.4f})')
+        plt.show()
+
     # Determinar si es un máximo o mínimo
     if extreme == "max" and a >= 0:
         return extreme_location, extreme_value_by_index, 0.0
@@ -102,3 +120,97 @@ def spline_zeros(rc, z):
     for i, y in enumerate(xy_out[:, 1]):
         xy_out[i, 0] = spline(y)[0]
     return xy_out
+
+
+def proportionality_with_uncertainties(x, y, ux, uy):
+    a = np.sum(x*y / uy**2) / np.sum(x**2 / uy**2)
+
+    for _ in range(20):
+        w = 1 / (uy**2 + (a**2) * ux**2)
+        a = np.sum(w * x * y) / np.sum(w * x**2)
+
+    ua = np.sqrt(1 / np.sum(w * x**2))
+    return a, ua
+
+
+class OptimizerState:
+
+    def __init__(
+        self, objective_function, args=(), track_optimization=False, regularization_parameter=0.0, parameter_names=None
+    ):
+        self.lambda_history = []
+        self.iteration = 0
+        self.fun_history = []
+        self.x_history = []
+        self.reg_lambda = regularization_parameter
+        self.track_optimization = track_optimization
+        self.objective_function = objective_function
+        self.args = args
+        self.this_iteration_evals = []
+        self.parameter_names = parameter_names
+
+    @property
+    def reg_lambda(self):
+        return self._reg_lambda
+
+    @reg_lambda.setter
+    def reg_lambda(self, value):
+        self._reg_lambda = value
+        self.lambda_history.append([self.iteration, value])
+
+    def objective(self, x):
+        """
+        The objective function has arguments (x, regularization_parameter, *args)
+        """
+        loss, penalty = self.objective_function(x, self.reg_lambda, *self.args)
+        fun = loss + penalty
+        self.this_iteration_evals.append((x, loss, penalty, fun))
+        return fun
+
+    def __call__(self, intermediate_result):
+        self.iteration += 1
+        values_cost_this_iteration = np.array([[loss, p, f] for _, loss, p, f in self.this_iteration_evals])
+        values_cost_current = values_cost_this_iteration[values_cost_this_iteration[:, 2] == intermediate_result.fun]
+
+        if self.track_optimization:
+            self.fun_history.append(values_cost_current)
+            self.x_history.append(np.copy(intermediate_result.x))
+        self.this_iteration_evals = []
+
+    def plot_history(self):
+        if self.track_optimization:
+            fun_history = np.concatenate(self.fun_history, axis=0)
+            loss_proportion = fun_history[:, 0] / fun_history[:, 2]
+            penalty_proportion = fun_history[:, 1] / fun_history[:, 2]
+            x_history = np.array(self.x_history)
+            x_mins = np.min(x_history, axis=0)
+            x_maxs = np.max(x_history, axis=0)
+            x_history = (x_history - x_mins) / (x_maxs - x_mins + 1e-12)
+
+            fig, axs = plt.subplots(1, 3, figsize=(16, 6))
+            axs[0].plot(fun_history[:, 2], label='Objective Function Value')
+            axs[0].set_xlabel('Iteration')
+            axs[0].set_ylabel('Objective Function Value')
+            axs[0].set_title('Objective Function History')
+            axs[1].plot(loss_proportion, label='Loss Proportion')
+            axs[1].plot(penalty_proportion, label='Penalty Proportion')
+            axs[1].set_xlabel('Iteration')
+            axs[1].set_ylabel('Proportion')
+            axs[1].set_title('Loss and Penalty Proportions')
+            axs[1].legend()
+            axs[2].plot(x_history)
+            axs[2].set_xlabel('Iteration')
+            axs[2].set_ylabel('Parameter Values Normalized')
+            axs[2].set_title('Parameter History')
+            if self.parameter_names is None:
+                self.parameter_names = [f'Param {i}' for i in range(x_history.shape[1])]
+            legend_2 = []
+            for i in range(x_history.shape[1]):
+                legend_2.append(f'{self.parameter_names[i]}. MIN: {x_mins[i]:.3f}, MAX: {x_maxs[i]:.3f}')
+            axs[2].legend(legend_2)
+            for ax in axs:
+                for lambda_point in self.lambda_history:
+                    ax.axvline(x=lambda_point[0], color='r', linestyle='--', alpha=0.5,
+                               label=f'Lambda = {lambda_point[1]:.3f}')
+            axs[0].legend()
+            plt.show()

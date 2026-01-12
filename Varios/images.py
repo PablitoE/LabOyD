@@ -1,5 +1,6 @@
 import numpy as np
 from scipy.ndimage import binary_fill_holes
+from cv2 import GaussianBlur, normalize, NORM_MINMAX
 
 
 def all_pixels_inside_border(border, shape):
@@ -39,3 +40,12 @@ def minimum_point_per_row(array_rc, values):
         min_points[index] = row_points[min_index]
 
     return min_points
+
+
+def log_normalize(img, sigma=50):
+    safe_img = img.astype(np.float32) + 1e-6
+    logI = np.log(safe_img)
+    logL = GaussianBlur(logI, (0, 0), sigmaX=sigma, sigmaY=sigma)
+    logL = normalize(logL, None, norm_type=NORM_MINMAX) + 1e-6
+    img = img / logL
+    return img

@@ -7,7 +7,7 @@ from FlechaInterfranja.flecha_interfranja import search_points_in_valley, analyz
 debug_fringe_search = False
 debug_circle_detection = False
 debug_failed_rotation = False
-debug_failed_interfringe = True
+debug_failed_interferogram = True
 
 # Debugging fringe search
 if debug_fringe_search:
@@ -83,13 +83,64 @@ if debug_failed_rotation:
     plt.imshow(img_rotada, cmap='gray')
     plt.show()
 
-# Debugging failed interfringe
-if debug_failed_interfringe:
-    with open("debug_failed_interfringe.pkl", "rb") as f:
-        data = pickle.load(f)
+# Debugging failed interferogram analysis
+filename = "debug_failed_arrow.pkl"
+if debug_failed_interferogram:
+    with open(filename, "rb") as f:
+        cnt_ims = 0
+        while True:
+            try:
+                data = pickle.load(f)
+                cnt_ims += 1
+            except EOFError:
+                break
 
-    interferogram = data["interferogram"]
-    debugging_info = data["debugging_info"]
-    interfringe, arrow = analyze_interference(image_array=interferogram, save=False,
-                                              show_result=True,
-                                              debugging_info=debugging_info)
+    with open(filename, "rb") as f:
+        cnt = 1
+        while True:
+            try:
+                data = pickle.load(f)
+            except EOFError:
+                break
+
+            print(f"Imagen {cnt} de {cnt_ims}")
+            interferogram = data["interferogram"]
+            debugging_info = data["debugging_info"]
+            # from scipy.ndimage import rotate
+            # angle_deg_rotate = 10
+            # interferogram = rotate(interferogram, angle_deg_rotate, mode='nearest', reshape=False)
+            print(
+                f"Arrow (px): {debugging_info['arrow']}, Simulated arrow (px): {debugging_info['simulated_arrow_px']}"
+            )
+            N_REGULARIZERS = 20
+            arrows = np.zeros(N_REGULARIZERS)
+            interfringes = np.zeros(N_REGULARIZERS)
+            regularizers = np.logspace(-2, 1, N_REGULARIZERS)
+            for k_reg, reg_param in enumerate(regularizers):
+                interfringe, arrow = analyze_interference(
+                    image_array=interferogram, save=False, show_result=False, show=False, debugging_info=debugging_info,
+                    regularizer_parameter=reg_param,
+                )
+                interfringes[k_reg] = interfringe.n  # ufloat to float
+                arrows[k_reg] = arrow.n  # ufloat to float
+
+            fig, axs = plt.subplots(1, 2, figsize=(12, 5))
+            axs[0].semilogx(regularizers, interfringes, marker='o')
+            axs[0].set_xlabel("Regularizer parameter")
+            axs[0].set_ylabel("Interfringe distance (px)")
+            axs[0].set_title("Interfringe distance vs Regularizer parameter")
+            axs[0].axhline(
+                debugging_info["simulated_interfringe_spacing"], color='red', linestyle='--',
+                label='Simulated interfringe',
+            )
+            axs[0].legend()
+            axs[1].semilogx(regularizers, arrows, marker='o', color='orange')
+            axs[1].set_xlabel("Regularizer parameter")
+            axs[1].set_ylabel("Arrow (px)")
+            axs[1].set_title("Arrow vs Regularizer parameter")
+            axs[1].axhline(debugging_info["simulated_arrow_px"], color='red', linestyle='--', label='Simulated arrow')
+            axs[1].legend()
+            plt.suptitle(f"Debugging interferogram {cnt}")
+            plt.show()
+
+            cnt += 1
