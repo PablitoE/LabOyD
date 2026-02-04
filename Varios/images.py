@@ -1,6 +1,7 @@
 import numpy as np
 from scipy.ndimage import binary_fill_holes
 from cv2 import GaussianBlur, normalize, NORM_MINMAX
+import matplotlib.pyplot as plt
 
 
 def all_pixels_inside_border(border, shape):
@@ -49,3 +50,36 @@ def log_normalize(img, sigma=50):
     logL = normalize(logL, None, norm_type=NORM_MINMAX) + 1e-6
     img = img / logL
     return img
+
+
+def graphical_input_zones(img, help_text=None):
+    """
+    Allows the user to select rectangular areas on an image to define zones. The user is prompted to click twice on the
+    image to select the top-left and bottom-right corners of the zones. Middle mouse button to end selection, right
+    click to remove last point.
+
+    :param img: Image on which to select zones
+    :return: List of tuples of the form ((x1, y1), (x2, y2))
+    """
+    plt.imshow(img, cmap="gray")
+    plt.title(
+        "Select zones by clicking two points (top-left and bottom-right).\n"
+        "Middle click to finish, right click to remove last point."
+    )
+    if help_text:
+        plt.text(0.05, 0.95, help_text, transform=plt.gca().transAxes, fontsize=12, ha="left", va="top")
+    points = []
+    while True:
+        selected = plt.ginput(2, timeout=0, show_clicks=True)
+        if len(selected) < 2:
+            break
+        (x1, y1), (x2, y2) = selected
+        x1, x2 = int(round(x1)), int(round(x2))
+        y1, y2 = int(round(y1)), int(round(y2))
+        points.append(((min(x1, x2), min(y1, y2)), (max(x1, x2), max(y1, y2))))
+        plt.gca().add_patch(
+            plt.Rectangle((x1, y1), x2 - x1, y2 - y1, fill=False, edgecolor="red", linewidth=1.5,)
+        )
+        plt.draw()
+    plt.close()
+    return points

@@ -18,8 +18,8 @@ logger = logging.getLogger(__name__)
 
 N_MC_SAMPLES = 2000
 N_IMS_PER_SAMPLE = 10
-MIN_N_FRINGES = [6, 12, 18]
-MAX_N_FRINGES = [20, 26, 26]
+MIN_N_FRINGES = [6, 12, 20]
+MAX_N_FRINGES = [18, 26, 40]
 MAX_ROTATION_DEG = 20
 VISIBILITY_RATIO = 0.5
 NOISE_LEVEL = 0.015             # Relative to visibility ratio
@@ -186,7 +186,7 @@ if __name__ == "__main__":
             if MULTIPROCESSING:
                 with Pool() as pool:
                     args = [
-                        (sim_id, simulated_deviation_nm[sim_id], min_n_fringes, max_n_fringes)
+                        (sim_id, simulated_deviation_nm[sim_id], None, min_n_fringes, max_n_fringes)
                         for sim_id in range(N_MC_SAMPLES)
                     ]
                     results = list(tqdm(pool.imap(worker_star, args), total=N_MC_SAMPLES))

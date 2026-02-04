@@ -17,7 +17,9 @@ from datetime import datetime
 from heapq import nlargest, nsmallest
 from Varios.optimizations import encontrar_maximo_cuadratica, proportionality_with_uncertainties, OptimizerState
 from Varios.lines_points import associate_two_sets_of_lines, rotate_2d_points
-from Varios.images import log_normalize
+from Varios.images import log_normalize, graphical_input_zones
+from shapely.geometry import Point, Polygon
+from shapely import affinity, contains_xy, prepare
 
 
 WAVELENGTH_NM = 633
@@ -42,7 +44,7 @@ FIND_FRINGES_APERTURE_IN_SEARCH = 0.4
 MAX_NUMBER_POINTS_FIT = 7
 REQUIRED_IMS = 10
 RESULTS_DIR = "results"
-IQR_FACTOR_IMS = 1.0
+IQR_FACTOR_LAST_FIT_FOR_DEVIATION = 0.5
 IQR_FACTOR_POINTS_IN_FRINGES = 3.5
 OPTIMIZE_REGULARIZER_MAX_DEV = 0.15
 UNCERTAINTY_MAX_DISTANCE_PX = 5
@@ -56,8 +58,11 @@ PLOT_CIRCLES_DEBUG = False
 TRACK_OPTIMIZATION = False
 
 # Ruta de tu imagen o directorio con imágenes que comienzan con un número
-image_path = r"/home/pablo/OneDrive/Documentos/INTI-Calibraciones/Planos/LMD 2025/Imágenes/TOP"  # noqa: E501
-output_dir = os.path.join(image_path, RESULTS_DIR)
+image_path = r"/home/pablo/OneDrive/Documentos/INTI-Calibraciones/Planos/Mitutoyo 2025/Mitutoyo OT13145/BOTTOM"  # noqa: E501
+if os.path.isdir(image_path):
+    output_dir = os.path.join(image_path, RESULTS_DIR)
+else:
+    output_dir = os.path.join(os.path.dirname(image_path), RESULTS_DIR)
 os.makedirs(output_dir, exist_ok=True)
 logger = logging.getLogger(__name__)
 
@@ -206,13 +211,17 @@ def enmascarar_imagen(img, center_x, center_y, radius):
 
 def search_points_in_valley(img, x, y, step=1, aperture=1, discard_last_points=0, r_squared_threshold=0.999):
     edge_value = img[0, 0]
-    array_aperture = np.arange(-aperture, aperture + 1)
+    usual_array_aperture = np.arange(-aperture, aperture + 1)
+    large_array_aperture = np.arange(-aperture * 2, aperture * 2 + 1)
     x_prev, y_prev = x, y
     new_points = []
-    clean = True
-    # save_for_debug_detected = False
+    lost_track = False
     while True:
+        current_aperture = aperture * 2 if lost_track else aperture
+        array_aperture = large_array_aperture if lost_track else usual_array_aperture
         new_min_y = y_prev - step
+        if new_min_y < 0 or new_min_y >= img.shape[0]:
+            break
         inspect_values = img[new_min_y, x_prev + array_aperture]
         if np.any(inspect_values == edge_value):
             break
@@ -223,41 +232,13 @@ def search_points_in_valley(img, x, y, step=1, aperture=1, discard_last_points=0
         condition = (
             not np.isnan(new_min_x)
             and r_squared > r_squared_threshold
-            and (x_prev - aperture <= new_min_x <= x_prev + aperture)
+            and (x_prev - current_aperture <= new_min_x <= x_prev + current_aperture)
         )
         if condition:
             new_points.append((new_min_x, new_min_y))
-            if not clean:
-                clean = True
-                """
-                # Debugging
-                save_for_debug_detected = True
-                with open("debug_interrupted_fringe_search.pkl", "wb") as f:
-                    data_to_save = {
-                        "img": img, "x": x, "y": y, "step": step, "aperture": aperture,
-                        "discard_last_points": discard_last_points, "r_squared_threshold": r_squared_threshold
-                    }
-                    pickle.dump(data_to_save, f)
-                # quit()
-                """
+            lost_track = False
         else:
-            clean = False
-
-        """
-        # Debugging
-        if save_for_debug_detected:
-            just_min_in_inspect = np.argmin(inspect_values)
-            just_min = just_min_in_inspect + x_prev - aperture
-            plt.plot(x_prev + array_aperture, inspect_values)
-            plt.plot(just_min, inspect_values[just_min_in_inspect], 'ro', label='Mínimo simple')
-            plt.plot(new_min_x, value_y, 'go', label='Mínimo cuadrático. R²={:.3f}'.format(r_squared))
-            plt.legend(loc='upper right')
-            # plt.show(block=False)
-            # plt.pause(0.25) if condition else plt.pause(1)
-            # plt.cla()
-            plt.show()
-            quit()
-        """
+            lost_track = True
 
         if condition:
             x_prev = int(np.round(new_min_x))
@@ -423,16 +404,23 @@ def analyze_dir_or_image(image_path, reutilize_saved_results=True):
             flechas = []
             interfranjas = []
             image_files = []
+            flag_bad_areas = False
             for image_file in os.listdir(image_path):
                 image_file_path = os.path.join(image_path, image_file)
                 if (
                     re.match(r'^\d+', image_file) is not None
                     or re.match(r'^[\w\-\s\.]+?\d+\.[A-Za-z0-9]+$', image_file) is not None
                 ) and cv2.haveImageReader(image_file_path):
+                    if not flag_bad_areas:
+                        bad_areas = graphical_input_zones(
+                            cv2.imread(image_file_path),
+                            help_text="Dar margen extra a zonas claras para cubrir puntos oscuros de alrededor."
+                        )
+                        flag_bad_areas = True
+
                     logging.info("Analizando %s", image_file)
 
-                    i, f = analyze_interference(image_file_path)
-
+                    i, f = analyze_interference(image_file_path, bad_areas=bad_areas)
                     flechas.append(f)
                     interfranjas.append(i)
                     image_files.append(image_file)
@@ -455,11 +443,15 @@ def analyze_dir_or_image(image_path, reutilize_saved_results=True):
             if SAVE_RESULTS else None
         )
         plot_flechas_interfranjas(
-            flechas, interfranjas, save_path=save_path, iqr_factor=IQR_FACTOR_IMS
+            flechas, interfranjas, save_path=save_path, iqr_factor=IQR_FACTOR_LAST_FIT_FOR_DEVIATION
         )
 
     else:
-        analyze_interference(image_path)
+        bad_areas = graphical_input_zones(
+            cv2.imread(image_path),
+            help_text="Dar margen extra a zonas claras para cubrir puntos oscuros de alrededor."
+        )
+        analyze_interference(image_path, bad_areas=bad_areas)
 
 
 def plot_rotation(img, img_rotada, angle):
@@ -486,7 +478,8 @@ def plot_minima_profile(profile, minima_indices):
 def analyze_interference(image_path=None, image_array=None, show=SHOW_ALL,
                          show_result=SHOW_EACH_RESULT, save=SAVE_RESULTS,
                          debugging_info=None, regularizer_parameter=OPTIMIZE_REGULARIZER_MAX_DEV,
-                         n_largest_distances_for_arrow=N_LARGEST_DISTANCES_FOR_ARROW
+                         n_largest_distances_for_arrow=N_LARGEST_DISTANCES_FOR_ARROW,
+                         bad_areas=None
                          ) -> Tuple[ufloat, ufloat]:
     assert image_path is not None or image_array is not None
     date = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
@@ -674,6 +667,24 @@ def analyze_interference(image_path=None, image_array=None, show=SHOW_ALL,
         # Unir los puntos de arriba y abajo en una sola franja
         fringes[i] = np.concatenate((upper_points[::-1], [(x, y)], lower_points))
 
+    # Quitar áreas malas si se proporcionaron
+    if bad_areas is not None:
+        for bad_area in bad_areas:
+            x_min, y_min, x_max, y_max = np.array(bad_area).flatten()
+            polygon = Polygon([
+                (x_min, y_max),
+                (x_max, y_max),
+                (x_max, y_min),
+                (x_min, y_min),
+            ])
+            center_rotation = Point((np.asarray(img.shape)[::-1] - 1) / 2)
+            rotated_polygon = affinity.rotate(polygon, -angle_rotated, origin=center_rotation, use_radians=False)
+            prepare(rotated_polygon)
+
+            for i in range(len(fringes)):
+                mask_bad = np.array([contains_xy(rotated_polygon, point[0], point[1]) for point in fringes[i]])
+                fringes[i] = fringes[i][~mask_bad]
+
     # Encontrar lineas ideales correspondientes a las franjas
     rotated_valley_curves = None
     if debugging_info is not None and "valley_curves" in debugging_info.keys():
@@ -849,8 +860,9 @@ def plot_flechas_interfranjas(
         plt.savefig(save_path)
     plt.show()
 
+    flatness = pendiente_u * WAVELENGTH_NM / 2
     logging.info(
-        "La desviación máxima de planitud es %.2f nm.", pendiente_u * WAVELENGTH_NM / 2
+        "La desviación máxima de planitud es {:.2u} nm.".format(flatness)
     )
 
 
