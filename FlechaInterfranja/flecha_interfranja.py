@@ -93,17 +93,19 @@ def find_equidistant_peaks(signal, max_min='max', **kwargs):
     prominences = peak_prominences(signal, peaks)[0] if prominence is None else properties['prominences']
     min_n = np.min(closest_ns)
     max_n = np.max(closest_ns)
+    new_peaks = np.zeros(max_n - min_n + 1, dtype=int)
     for n in range(min_n, max_n + 1):
         idx_peaks_at_n = np.where(closest_ns == n)[0]
         if len(idx_peaks_at_n) > 1:
             closest_peaks = peaks[idx_peaks_at_n]
             idx_peak_at_n = np.argmin(np.abs(closest_peaks - (n * median_d_peak + res.x)) / prominences[idx_peaks_at_n])
-            idx_peaks_at_n = np.delete(idx_peaks_at_n, idx_peak_at_n)
-            peaks = np.delete(peaks, idx_peaks_at_n)
-        if n not in closest_ns:
-            peaks = np.insert(peaks, n - min_n, n * median_d_peak + res.x)
+            new_peaks[n - min_n] = closest_peaks[idx_peak_at_n]
+        elif len(idx_peaks_at_n) == 1:
+            new_peaks[n - min_n] = peaks[idx_peaks_at_n[0]]
+        else:
+            new_peaks[n - min_n] = np.round(n * median_d_peak + res.x).astype(int)
 
-    return peaks
+    return new_peaks
 
 
 def scaledLinearOp_To_array(scaledLinearOp):
