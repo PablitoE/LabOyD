@@ -117,7 +117,8 @@ class FlatInterferogramGenerator():
             plt.ylabel('Píxeles')
             plt.show()
 
-    def get_maximum_simulated_deviation_px(self, phase, plot=False):
+    def get_maximum_simulated_deviation_px(self, plot=False):
+        phase = self.current_phase.copy()
         phase[np.logical_not(self.aperture_mask)] = 0
         cos_phase = 1 + np.cos(phase)
         contours = measure.find_contours(cos_phase, 0.01)
@@ -138,7 +139,6 @@ class FlatInterferogramGenerator():
             plt.ylabel('Píxeles')
             plt.colorbar(label='Intensidad')
             plt.show()
-        return
 
     def rotate_simulated_minima_curves(self):
         self.minima_curves = rotate_2d_points(self.minima_curves, -self.current_rotation_angle, self.shape)
@@ -147,9 +147,9 @@ class FlatInterferogramGenerator():
         kx = normalized_carrier_frequency
         ky = 0.0
 
-        phase = 2 * np.pi * (kx * self.X + ky * self.Y + self.surface)
-        self.get_maximum_simulated_deviation_px(phase, plot=False)
-        interferogram = 1 + self.visibility_ratio * np.cos(phase)
+        self.current_phase = 2 * np.pi * (kx * self.X + ky * self.Y + self.surface)
+        self.get_maximum_simulated_deviation_px(plot=False)
+        interferogram = 1 + self.visibility_ratio * np.cos(self.current_phase)
         interferogram *= self.aperture_mask
         interferogram = self.random_rotation(interferogram)
         interferogram += np.random.normal(0, 1, size=self.shape) * self.noise_level * self.visibility_ratio

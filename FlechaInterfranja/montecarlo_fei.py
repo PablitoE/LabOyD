@@ -18,8 +18,8 @@ logger = logging.getLogger(__name__)
 
 N_MC_SAMPLES = 2000
 N_IMS_PER_SAMPLE = 10
-MIN_N_FRINGES = [6, 12, 20]
-MAX_N_FRINGES = [18, 26, 40]
+MIN_N_FRINGES = [20]
+MAX_N_FRINGES = [40]
 MAX_ROTATION_DEG = 20
 VISIBILITY_RATIO = 0.5
 NOISE_LEVEL = 0.015             # Relative to visibility ratio
@@ -69,7 +69,8 @@ def worker(sim_id, simulated_deviation_nm, generator=None, min_fringes=MIN_N_FRI
     )):
         simulated_rotation_angle[k_interferogram] = generator.current_rotation_angle
         debugging_info = {"valley_curves": generator.minima_curves,
-                          "simulated_interfringe_spacing": 1 / generator.current_frequency}
+                          "simulated_interfringe_spacing": 1 / generator.current_frequency,
+                          "phase_map": generator.current_phase}
         if not MULTIPROCESSING and PLOT_INTERFEROGRAMS:
             generator.plot_interferogram()
 
@@ -150,8 +151,8 @@ if __name__ == "__main__":
     SAVE_PATH = "Data/Resultados/MonteCarloFEI"
     LOAD_FILENAME = ""
     logging.basicConfig(
-        level=logging.CRITICAL,
-        format='%(asctime)s - %(levelname)s - %(message)s',
+        level=logging.INFO,
+        format='%(asctime)s - %(levelname)s - %(module)s.%(funcName)s:%(lineno)d - %(message)s',
         datefmt='%Y-%m-%d %H:%M:%S',
         handlers=[logging.FileHandler(os.path.join(SAVE_PATH, "mc_flecha_interfranja.log")),
                   logging.StreamHandler()]
@@ -317,9 +318,6 @@ if __name__ == "__main__":
                 fig_error_arrows.savefig(os.path.join(SAVE_PATH, f"{date}_error_flechas.png"))
 
             errors = np.sqrt(np.abs(nominal_values(measured_max_deviations) - simulated_deviation_nm) ** 2)
-            logger.info(f"RMSE: {np.mean(errors)}")
-            # logger.info(simulated_deviation_nm)
-            # logger.info(measured_max_deviations)
             np.savez(os.path.join(SAVE_PATH, f"{date}_results.npz"), simulated_deviation_nm=simulated_deviation_nm,
                      measured_max_deviations=measured_max_deviations)
 
@@ -330,7 +328,6 @@ if __name__ == "__main__":
         predicted_measured_deviations = proportionality_constant * simulated_deviation_nm
 
         errors = np.sqrt(np.abs(nominal_values(measured_max_deviations) - predicted_measured_deviations) ** 2)
-        logger.info(f"RMSE (lineal): {np.mean(errors)}")
 
         if PLOT_RESULTS:
             fig, axs = plt.subplots(2, 2, figsize=(16, 10))

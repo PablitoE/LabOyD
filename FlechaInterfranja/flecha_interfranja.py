@@ -655,7 +655,7 @@ def analyze_interference(image_path=None, image_array=None, show=SHOW_ALL,
     n_fringes = len(x_positions)
     fringes = [None] * n_fringes
     find_fringes_aperture = int(n_search_fringe * FIND_FRINGES_APERTURE_IN_SEARCH)
-    logging.info(
+    logging.debug(
         "Encontradas %d franjas. Buscando puntos cada %d filas, en rango de %d pixeles.",
         n_fringes, FIND_FRINGES_STEP, find_fringes_aperture,
     )
@@ -691,6 +691,37 @@ def analyze_interference(image_path=None, image_array=None, show=SHOW_ALL,
     rotated_valley_curves = None
     if debugging_info is not None and "valley_curves" in debugging_info.keys():
         rotated_valley_curves = rotate_2d_points(debugging_info["valley_curves"], -angle_rotated, shape=img.shape)
+
+        if len(rotated_valley_curves) < len(fringes):
+            logging.warning(
+                "No se proporcionaron suficientes curvas de valle para asociar con las franjas detectadas. "
+                "Se necesitan al menos %d curvas de valle, pero se proporcionaron %d.",
+                len(fringes), len(rotated_valley_curves)
+            )
+            plt.imshow(blur_masked, cmap='gray')
+            for i, fringe in enumerate(fringes):
+                plt.plot(fringe[:, 0], fringe[:, 1], 'ro', label=f'Franja #{i}')
+            for i, curve in enumerate(rotated_valley_curves):
+                plt.plot(curve[:, 1], curve[:, 0], 'go', label=f'Curva de valle #{i}')
+            plt.legend()
+            plt.title("Curvas de valle rotadas (no suficientes para asociar con las franjas)")
+            plt.show()
+            with open(f"{date}_debug_insufficient_valley_curves.pkl", "wb") as f:
+                data_to_save = {
+                    "rotated_valley_curves": rotated_valley_curves,
+                    "fringes": fringes,
+                    "image_array": img,
+                    "phase_map": debugging_info["phase_map"]
+                }
+                pickle.dump(data_to_save, f)
+                logger.info("Datos de depuracion guardados en %s", f"{date}_debug_insufficient_valley_curves.pkl")
+        else:
+            debugging_info["rotation_angle_estimated_corrected"] = np.nan
+            debugging_info["rmsd_to_valley_curves"] = np.nan
+            debugging_info["max_distance_fringe_to_valley_curve"] = np.nan
+            debugging_info["avg_largest_distances_to_valley_curves"] = np.nan
+            return ufloat(np.nan, np.nan), ufloat(np.nan, np.nan)  # debugging
+
         # Valley curves are given as (row, column) but fringes are (x, y)
         fringe_index_in_valley_curves, distances_fringes_to_valley = associate_two_sets_of_lines(
             rotated_valley_curves, fringes, flip=True
