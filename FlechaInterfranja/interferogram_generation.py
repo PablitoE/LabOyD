@@ -121,7 +121,7 @@ class FlatInterferogramGenerator():
         phase = self.current_phase.copy()
         phase[np.logical_not(self.aperture_mask)] = 0
         cos_phase = 1 + np.cos(phase)
-        contours = measure.find_contours(cos_phase, 0.01)
+        contours = measure.find_contours(cos_phase, 0.05)
         self.minima_curves = []
         if plot:
             plt.imshow(cos_phase, cmap='jet')

@@ -2,6 +2,7 @@ import numpy as np
 from scipy.ndimage import binary_fill_holes
 from cv2 import GaussianBlur, normalize, NORM_MINMAX
 import matplotlib.pyplot as plt
+from Varios.optimizations import encontrar_maximo_cuadratica
 
 
 def all_pixels_inside_border(border, shape):
@@ -37,8 +38,12 @@ def minimum_point_per_row(array_rc, values):
         row_points = array_rc[mask]
         row_values = values[mask]
 
-        min_index = np.argmin(row_values)
-        min_points[index] = row_points[min_index]
+        min_index, _, _ = encontrar_maximo_cuadratica(row_points[:, 1], row_values, max_number_points=0, show=False,
+                                                      extreme="min", extra_title=f"Row {r} in ({min_row}, {max_row})")
+        min_points[index] = (r, min_index)
+
+        # min_index = np.argmin(row_values)
+        # min_points[index] = row_points[min_index]
 
     return min_points
 
