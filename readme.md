@@ -1,7 +1,19 @@
 # Herramientas de Python para laboratorios del Departamento de Óptica y Dimensional
 
-La clase `DataReader` está diseñada para leer y procesar datos de un archivo de texto con formato de ancho fijo, convirtiéndolos en un DataFrame de pandas, y proporcionando métodos para recuperar y visualizar los datos.Si .SiS
+## Utilidades (utils)
 
+### Certificados automáticos en PDF
+
+El script `certificado_bp.py` genera un certificado en formato PDF a partir de un template en Excel. El template se encuentra en la carpeta `resources/Certificados`. Las hojas de este template contienen la información necesaria para generar el certificado. En las hojas que se agregan mediante la función `add_sections`, existen varios comportamientos que se configuran mediante el contenido de las columnas de cada fila:
+- Texto simple: Se imprime el texto de la columna A en la hoja.
+- Título: Se imprime el texto de la columna A en la hoja con un título. El texto debe comenzar con `#`.
+- Dos columnas: Se imprime el texto de las columna A en dos columnas. La columna B debe contener `two_columns`. Las filas consecutivas con `two_columns` se unen en un solo texto que se imprime en dos columnas.
+- Imagen: Se imprime la imagen con el nombre de archivo dado en la columna B (ubicado en la carpeta `resources/Certificados`). El texto de la columna A se imprime debajo de la imagen, pero debe comenzar con `_fig`, lo cual se ignora al imprimir. La columna C contiene el ancho de la imagen en mm.
+- Valor con unidades: Se imprime el texto de la columna A seguido del texto HTML de la columna B.
+
+### keithley_data_reader.py
+
+La clase `DataReader` está diseñada para leer y procesar datos de un archivo de texto con formato de ancho fijo, convirtiéndolos en un DataFrame de pandas, y proporcionando métodos para recuperar y visualizar los datos.Si .SiS
 
 ## Flecha e interfranja
 
