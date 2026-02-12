@@ -6,3 +6,5 @@
 Data/Resultados
 *.log
 *.pkl
+*.pyc
+/*.pdf
