@@ -1,0 +1,30 @@
+[project]
+name = "LabOyD"
+version = "0.1.0"
+description = "Conjunto de utilidades y herramientas para el Departamento de Óptica y Dimensional."
+requires-python = ">=3.8"
+dependencies = [
+    "numpy", "pandas", "fpdf2", "openpyxl"
+]
+
+[tool.ruff]
+line-length = 120
+select = [
+    "E",  # Error
+    "W",  # Warning
+    "F",  # Pyflakes
+    "I",  # isort
+    "B",  # flake8-bugbear
+    "C4", # flake8-comprehensions
+    "ISC",# flake8-implicit-str-concat
+    "N",  # pep8-naming    
+]
+
+# Exclude files/directories
+exclude = [
+    ".jpg",
+    ".pdf",
+]
+
+[tool.ruff.format]
+quote-style = "single"

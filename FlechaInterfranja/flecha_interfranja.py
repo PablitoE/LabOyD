@@ -1,26 +1,27 @@
-from typing import Tuple
-import numpy as np
-import cv2
-import matplotlib.pyplot as plt
-import pickle
-from scipy.signal import find_peaks, peak_prominences
-from scipy.optimize import minimize, curve_fit, minimize_scalar
-from scipy.stats import linregress
-from scipy import fftpack
-from scipy.ndimage import rotate
-from uncertainties import ufloat
-from uncertainties.unumpy import nominal_values, sqrt
-import os
-import re
 import logging
+import os
+import pickle
+import re
 from datetime import datetime
 from heapq import nlargest, nsmallest
-from Varios.optimizations import encontrar_maximo_cuadratica, proportionality_with_uncertainties, OptimizerState
-from Varios.lines_points import associate_two_sets_of_lines, rotate_2d_points
-from Varios.images import log_normalize, graphical_input_zones
-from shapely.geometry import Point, Polygon
-from shapely import affinity, contains_xy, prepare
+from typing import Tuple
 
+import cv2
+import matplotlib.pyplot as plt
+import numpy as np
+from scipy import fftpack
+from scipy.ndimage import rotate
+from scipy.optimize import curve_fit, minimize, minimize_scalar
+from scipy.signal import find_peaks, peak_prominences
+from scipy.stats import linregress
+from shapely import affinity, contains_xy, prepare
+from shapely.geometry import Point, Polygon
+from uncertainties import ufloat
+from uncertainties.unumpy import nominal_values, sqrt
+
+from Varios.images import graphical_input_zones, log_normalize
+from Varios.lines_points import associate_two_sets_of_lines, rotate_2d_points
+from Varios.optimizations import OptimizerState, encontrar_maximo_cuadratica, proportionality_with_uncertainties
 
 WAVELENGTH_NM = 633
 
@@ -108,30 +109,30 @@ def find_equidistant_peaks(signal, max_min='max', **kwargs):
     return new_peaks
 
 
-def scaledLinearOp_To_array(scaledLinearOp):
-    identity = np.eye(scaledLinearOp.shape[0])
-    return scaledLinearOp.matmat(identity)
+def scaledLinearOp_To_array(scaled_linear_op):  # noqa: N802
+    identity = np.eye(scaled_linear_op.shape[0])
+    return scaled_linear_op.matmat(identity)
 
 
 def rotate_image_to_max_frequency(
     img_array, ignore_low_freq_pixels=2, precision=3, range_angle_deg=4, n_range_angle=11, n_refine_neighbors=2,
     n_refine_add_between=2, central_rows_ratio=None
 ):
-    Nr, Nc = img_array.shape
-    Nr_ = Nr * precision
-    Nc_ = Nc * precision
+    nr, nc = img_array.shape
+    nr_ = nr * precision
+    nc_ = nc * precision
     ignore_low_freq_pixels *= precision
     # Calcular la transformada de Fourier 2D
-    fft_img = fftpack.fftshift(fftpack.fft2(img_array, shape=(Nr_, Nc_)))
+    fft_img = fftpack.fftshift(fftpack.fft2(img_array, shape=(nr_, nc_)))
 
     # Ignorar la componente continua y una cierta cantidad de pixeles aledaños
-    fft_img[Nr_//2-ignore_low_freq_pixels:Nr_//2+ignore_low_freq_pixels,
-            Nc_//2-ignore_low_freq_pixels:Nc_//2+ignore_low_freq_pixels] = 0
+    fft_img[nr_//2-ignore_low_freq_pixels:nr_//2+ignore_low_freq_pixels,
+            nc_//2-ignore_low_freq_pixels:nc_//2+ignore_low_freq_pixels] = 0
 
     # Encontrar el máximo de frecuencia espacial en el primer o cuarto cuadrante
-    fft_img = fft_img[:, Nc_//2:]
+    fft_img = fft_img[:, nc_//2:]
     max_freq_idx = np.unravel_index(np.argmax(np.abs(fft_img)), fft_img.shape)
-    max_freq_idx = (Nr_//2 - max_freq_idx[0], max_freq_idx[1])
+    max_freq_idx = (nr_//2 - max_freq_idx[0], max_freq_idx[1])
 
     # Calcular el ángulo de rotación
     angle = - np.rad2deg(np.arctan2(max_freq_idx[0], max_freq_idx[1]))
@@ -140,17 +141,17 @@ def rotate_image_to_max_frequency(
     if central_rows_ratio is None:
         central_rows_ratio = 1
     assert 0 < central_rows_ratio <= 1, "central_rows_ratio debe ser menor o igual a 1"
-    central_rows = slice(int(Nr * (0.5 - central_rows_ratio / 2)), int(Nr * (0.5 + central_rows_ratio / 2)))
+    central_rows = slice(int(nr * (0.5 - central_rows_ratio / 2)), int(nr * (0.5 + central_rows_ratio / 2)))
 
     # Proponer varios ángulos posibles
     variations_cum = np.zeros(n_range_angle)
     possible_angles = np.linspace(angle - range_angle_deg, angle + range_angle_deg,
                                   n_range_angle)
     cumulative_intensity = np.sum(img_array[central_rows].astype(np.float64), axis=0)
-    if Nc % 2 == 0:
-        cumulative_intensity = cumulative_intensity[Nc//2:] + np.flip(cumulative_intensity[:Nc//2])
+    if nc % 2 == 0:
+        cumulative_intensity = cumulative_intensity[nc//2:] + np.flip(cumulative_intensity[:nc//2])
     else:
-        cumulative_intensity = cumulative_intensity[(Nc//2)+1:] + np.flip(cumulative_intensity[:Nc//2])
+        cumulative_intensity = cumulative_intensity[(nc//2)+1:] + np.flip(cumulative_intensity[:nc//2])
     cumulative_intensity /= np.sum(cumulative_intensity)
     cumulative_intensity = np.cumsum(cumulative_intensity)
     limit = np.where(cumulative_intensity > 0.95)[0][0]
@@ -158,7 +159,7 @@ def rotate_image_to_max_frequency(
     for ka, angle in enumerate(possible_angles):
         rotated_img = rotate(img_array, angle, mode='nearest', reshape=False)
         cumulative_intensity = np.sum(rotated_img[central_rows], axis=0)
-        variations_cum[ka] = np.var(cumulative_intensity[Nc // 2 - limit:Nc // 2 + limit])
+        variations_cum[ka] = np.var(cumulative_intensity[nc // 2 - limit:nc // 2 + limit])
 
     # Proponer ángulos posibles cercanos al máximo
     idx_max = np.argmax(variations_cum)
@@ -175,7 +176,7 @@ def rotate_image_to_max_frequency(
             continue
         rotated_img = rotate(img_array, angle, mode='nearest', reshape=False)
         cumulative_intensity = np.sum(rotated_img[central_rows], axis=0)
-        new_variations_cum[ka] = np.var(cumulative_intensity[Nc // 2 - limit:Nc // 2 + limit])
+        new_variations_cum[ka] = np.var(cumulative_intensity[nc // 2 - limit:nc // 2 + limit])
     possible_angles = np.concatenate(
         (possible_angles[:start_refine], new_possible_angles, possible_angles[end_refine:])
     )
@@ -195,8 +196,8 @@ def rotate_image_to_max_frequency(
 
 
 def blurrear_imagen(img, kernel_size=GAUSSIAN_BLUR_KERNEL_SIZE,
-                    sigma=GAUSSIAN_BLUR_SIGMA, sigmaY_factor=0):
-    return cv2.GaussianBlur(img, (kernel_size, kernel_size), sigma, sigmaY=sigmaY_factor * sigma)
+                    sigma=GAUSSIAN_BLUR_SIGMA, sigmay_factor=0):
+    return cv2.GaussianBlur(img, (kernel_size, kernel_size), sigma, sigmaY=sigmay_factor * sigma)
 
 
 def enmascarar_imagen(img, center_x, center_y, radius):
@@ -353,7 +354,7 @@ def remove_gaussian_from_curve(data):
     return data - gaussiana(x_, *popt)
 
 
-def obtener_gaussiana_2D(img):
+def obtener_gaussiana_2d(img):
     def gaussiana_2d(xy, a, x0, y0, sigma_x, sigma_y):
         x = xy[0]
         y = xy[1]
@@ -364,13 +365,13 @@ def obtener_gaussiana_2D(img):
     # Crear un arreglo 2D de coordenadas x e y
     x = np.arange(img.shape[1])
     y = np.arange(img.shape[0])
-    X, Y = np.meshgrid(x, y)
+    x, y = np.meshgrid(x, y)
 
     # Ajustar la curva con la gaussiana 2D
     p0 = np.array([1, img.shape[1]/2, img.shape[0]/2, 10, 10])
-    XY = np.vstack((X.ravel(), Y.ravel()))
-    popt, _ = curve_fit(gaussiana_2d, XY, img.ravel(), p0=p0, xtol=1e-6, ftol=1e-6, maxfev=1000)
-    z_values = gaussiana_2d(XY, *popt)
+    xy = np.vstack((x.ravel(), y.ravel()))
+    popt, _ = curve_fit(gaussiana_2d, xy, img.ravel(), p0=p0, xtol=1e-6, ftol=1e-6, maxfev=1000)
+    z_values = gaussiana_2d(xy, *popt)
     return z_values.reshape(img.shape)
 
 
@@ -420,7 +421,7 @@ def analyze_dir_or_image(image_path, reutilize_saved_results=True):
                         )
                         flag_bad_areas = True
 
-                    logging.info("Analizando %s", image_file)
+                    logger.info("Analizando %s", image_file)
 
                     i, f = analyze_interference(image_file_path, bad_areas=bad_areas)
                     flechas.append(f)
@@ -431,7 +432,7 @@ def analyze_dir_or_image(image_path, reutilize_saved_results=True):
             image_files = np.array(image_files)
 
             if len(flechas) < REQUIRED_IMS:
-                logging.info(
+                logger.info(
                     "No se encontraron suficientes imagenes para el análisis de acuerdo "
                     "al procedimiento (%s imágenes).", REQUIRED_IMS
                 )
@@ -655,7 +656,7 @@ def analyze_interference(image_path=None, image_array=None, show=SHOW_ALL,
     n_fringes = len(x_positions)
     fringes = [None] * n_fringes
     find_fringes_aperture = int(n_search_fringe * FIND_FRINGES_APERTURE_IN_SEARCH)
-    logging.debug(
+    logger.debug(
         "Encontradas %d franjas. Buscando puntos cada %d filas, en rango de %d pixeles.",
         n_fringes, FIND_FRINGES_STEP, find_fringes_aperture,
     )
@@ -693,7 +694,7 @@ def analyze_interference(image_path=None, image_array=None, show=SHOW_ALL,
         rotated_valley_curves = rotate_2d_points(debugging_info["valley_curves"], -angle_rotated, shape=img.shape)
 
         if len(rotated_valley_curves) < len(fringes):
-            logging.warning(
+            logger.warning(
                 "No se proporcionaron suficientes curvas de valle para asociar con las franjas detectadas. "
                 "Se necesitan al menos %d curvas de valle, pero se proporcionaron %d.",
                 len(fringes), len(rotated_valley_curves)
@@ -715,12 +716,14 @@ def analyze_interference(image_path=None, image_array=None, show=SHOW_ALL,
                 }
                 pickle.dump(data_to_save, f)
                 logger.info("Datos de depuracion guardados en %s", f"{date}_debug_insufficient_valley_curves.pkl")
+        """
         else:
             debugging_info["rotation_angle_estimated_corrected"] = np.nan
             debugging_info["rmsd_to_valley_curves"] = np.nan
             debugging_info["max_distance_fringe_to_valley_curve"] = np.nan
             debugging_info["avg_largest_distances_to_valley_curves"] = np.nan
             return ufloat(np.nan, np.nan), ufloat(np.nan, np.nan)  # debugging
+        """
 
         # Valley curves are given as (row, column) but fringes are (x, y)
         fringe_index_in_valley_curves, distances_fringes_to_valley = associate_two_sets_of_lines(
@@ -737,7 +740,7 @@ def analyze_interference(image_path=None, image_array=None, show=SHOW_ALL,
     if debugging_info is not None:
         debugging_info["rotation_angle_estimated_corrected"] = angle_rotated
 
-    logging.info("Distancias media entre rectas: %s (k=1)", interfringe_distance)
+    logger.debug("Distancias media entre rectas: %s (k=1)", interfringe_distance)
 
     # Calcular desviación máxima de la recta
     all_distances = distances_sets_of_points_to_lines(
@@ -782,7 +785,7 @@ def analyze_interference(image_path=None, image_array=None, show=SHOW_ALL,
     fringe_with_max_deviation = np.argmax(total_distances)
     error_max_distance = UNCERTAINTY_MAX_DISTANCE_PX  # np.std(total_distances) / np.sqrt(len(total_distances))
     arrow = ufloat(arrow_value, error_max_distance)
-    logging.info("Desviación máxima de la recta: %s (k=1)", arrow)
+    logger.debug("Desviación máxima de la recta: %s (k=1)", arrow)
     if debugging_info is not None and "valley_curves" in debugging_info.keys():
         debugging_info["rmsd_to_valley_curves"] = np.mean(rmsd_to_valley_curves)
         debugging_info["avg_largest_distances_to_valley_curves"] = np.mean(
@@ -894,7 +897,7 @@ def plot_flechas_interfranjas(
     plt.show()
 
     flatness = pendiente_u * WAVELENGTH_NM / 2
-    logging.info(
+    logger.info(
         "La desviación máxima de planitud es {:.2u} nm.".format(flatness)
     )
 

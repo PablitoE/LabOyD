@@ -1,19 +1,22 @@
+import logging
 import os
 import pickle
 from datetime import datetime
-import numpy as np
-import flecha_interfranja as fei
-from uncertainties.unumpy import nominal_values, uarray, std_devs
-import matplotlib.pyplot as plt
-import logging
 from multiprocessing import Pool
+
+import flecha_interfranja as fei
+import matplotlib.pyplot as plt
+import numpy as np
 from interferogram_generation import FlatInterferogramGenerator
 from tqdm import tqdm
-from Varios.plot import boxplot_by_bins
+from uncertainties.unumpy import nominal_values, std_devs, uarray
 
+from Varios.plot import boxplot_by_bins
 
 BASE_SEED = 50
 GENERATE_DEBUG_INFO = False
+DEBUG_ARROW = False
+DEBUG_DISTANCE_TO_VALLEY = True
 logger = logging.getLogger(__name__)
 
 N_MC_SAMPLES = 2000
@@ -80,8 +83,6 @@ def worker(sim_id, simulated_deviation_nm, generator=None, min_fringes=MIN_N_FRI
 
         # Debugging
         if GENERATE_DEBUG_INFO:
-            DEBUG_ARROW = False
-            DEBUG_DISTANCE_TO_VALLEY = True
             if SIMULATION_MODE in ["random", "random_maxfixed"]:
                 simulated_deviation_nm = generator.current_maximum_deviation_nm
             simulated_arrow_px = simulated_deviation_nm / WAVELENGTH_NM * 2 / generator.current_frequency

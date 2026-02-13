@@ -1,7 +1,8 @@
-import numpy as np
-from scipy.ndimage import binary_fill_holes
-from cv2 import GaussianBlur, normalize, NORM_MINMAX
 import matplotlib.pyplot as plt
+import numpy as np
+from cv2 import NORM_MINMAX, GaussianBlur, normalize
+from scipy.ndimage import binary_fill_holes
+
 from Varios.optimizations import encontrar_maximo_cuadratica
 
 
@@ -50,10 +51,10 @@ def minimum_point_per_row(array_rc, values):
 
 def log_normalize(img, sigma=50):
     safe_img = img.astype(np.float32) + 1e-6
-    logI = np.log(safe_img)
-    logL = GaussianBlur(logI, (0, 0), sigmaX=sigma, sigmaY=sigma)
-    logL = normalize(logL, None, norm_type=NORM_MINMAX) + 1e-6
-    img = img / logL
+    log_i = np.log(safe_img)
+    log_l = GaussianBlur(log_i, (0, 0), sigmaX=sigma, sigmaY=sigma)
+    log_l = normalize(log_l, None, norm_type=NORM_MINMAX) + 1e-6
+    img = img / log_l
     return img
 
 

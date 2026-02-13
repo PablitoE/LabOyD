@@ -1,13 +1,13 @@
-from FlechaInterfranja.interferogram_generation import FlatInterferogramGenerator
 import numpy as np
 
+from FlechaInterfranja.interferogram_generation import FlatInterferogramGenerator
 
 if __name__ == "__main__":
     import pickle
 
     with open("2026-02-11_12-22-40_debug_insufficient_valley_curves.pkl", "rb") as f:
         data = pickle.load(f)
-    
+
     phase_map = data["phase_map"]
 
     n_fringes = 12
