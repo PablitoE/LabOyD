@@ -3,7 +3,8 @@ import numpy as np
 
 def associate_two_sets_of_lines(lines1, lines2, flip=False):
     assert len(lines2) <= len(lines1), "El número de líneas en el segundo conjunto debe ser menor o igual que en el "\
-                                       "primero."
+                                       "primero. En este caso, el número de líneas en el segundo conjunto es {} y en"\
+                                       " el primero es {}".format(len(lines2), len(lines1))
     if flip:
         lines1 = [np.flip(line, axis=1) for line in lines1]
     # Calculate the rms_minimum distance between each pair of lines

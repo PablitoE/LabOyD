@@ -1,9 +1,9 @@
-import numpy as np
 import matplotlib.pyplot as plt
+import numpy as np
 from scipy.interpolate import make_splprep
 
 
-def encontrar_maximo_cuadratica(arr_x, arr_y=None, max_number_points=7, extreme="max", show=False):
+def encontrar_maximo_cuadratica(arr_x, arr_y=None, max_number_points=7, extreme="max", show=False, extra_title=""):
     """
     Encontrar el extremo de un array 1d que tiene forma de cuadrática
     ajustando un polinomio de orden 2
@@ -14,7 +14,7 @@ def encontrar_maximo_cuadratica(arr_x, arr_y=None, max_number_points=7, extreme=
     arr_y : np.ndarray, optional
         Array con los valores en y. Si es None, se usa arr_x como arr_y
     max_number_points : int, optional
-        Número máximo de puntos a usar para el ajuste. Por defecto es 7
+        Número máximo de puntos a usar para el ajuste. Por defecto es 7. 0 para todos.
     extreme : str, optional
         Tipo de extremo a buscar: "max" para máximo, "min" para mínimo, "both" para lo que esté más cercano al centro.
         Por defecto es "max"
@@ -38,6 +38,7 @@ def encontrar_maximo_cuadratica(arr_x, arr_y=None, max_number_points=7, extreme=
     arr_y_original = arr_y.copy()
 
     # Limitar el número de puntos para el ajuste
+    max_number_points = len(arr_x) if max_number_points == 0 else max_number_points
     if extreme == "max":
         extreme_index = np.argmax(arr_y)
     elif extreme == "min":
@@ -66,21 +67,27 @@ def encontrar_maximo_cuadratica(arr_x, arr_y=None, max_number_points=7, extreme=
         return arr_x[len(arr_x) // 2], 0, 0.0
 
     # Ajustar el polinomio de orden 2
-    coeffs = np.polyfit(arr_x, arr_y, 2)
-    poly = np.poly1d(coeffs)
+    if len(arr_x) >= 3:
+        coeffs = np.polyfit(arr_x, arr_y, 2)
+        poly = np.poly1d(coeffs)
 
-    # Encontrar un nivel de incertidumbre en la posición del extremo
-    residuals = arr_y - poly(arr_x)
-    ss_res = np.sum(residuals**2)
-    ss_y = np.linalg.norm(arr_y)**2
-    r_squared = 1 - (ss_res / ss_y)
-    if not np.isfinite(r_squared):
+        # Encontrar un nivel de incertidumbre en la posición del extremo
+        residuals = arr_y - poly(arr_x)
+        ss_res = np.sum(residuals**2)
+        ss_y = np.linalg.norm(arr_y)**2
+        r_squared = 1 - (ss_res / ss_y)
+        if not np.isfinite(r_squared):
+            r_squared = 0.0
+
+        # Encontrar el extremo del polinomio
+        a, b, c = coeffs
+        extr_x = -b / (2 * a)
+        extr_y = poly(extr_x)
+    else:
+        extr_x = extreme_index
+        extr_y = extreme_value_by_index
         r_squared = 0.0
-
-    # Encontrar el extremo del polinomio
-    a, b, c = coeffs
-    extr_x = -b / (2 * a)
-    extr_y = poly(extr_x)
+        a = 0
 
     # Plot para depuración
     if show:
@@ -93,7 +100,7 @@ def encontrar_maximo_cuadratica(arr_x, arr_y=None, max_number_points=7, extreme=
         plt.plot(x_fit, y_fit, '-', label='Ajuste cuadrático')
         plt.plot(extr_x, extr_y, 'rx', label='Extremo encontrado')
         plt.legend()
-        plt.title(f'Ajuste cuadrático (R² = {r_squared:.4f})')
+        plt.title(f'Ajuste cuadrático (R² = {r_squared:.4f}). {extra_title}')
         plt.show()
 
     # Determinar si es un máximo o mínimo

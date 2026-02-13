@@ -1,9 +1,11 @@
-import numpy as np
-import matplotlib.pyplot as plt
 import os
-from scipy.ndimage import rotate, gaussian_filter
+
+import matplotlib.pyplot as plt
+import numpy as np
 from PIL import Image
+from scipy.ndimage import gaussian_filter, rotate
 from skimage import measure
+
 from Varios.images import all_pixels_inside_border, minimum_point_per_row
 from Varios.lines_points import rotate_2d_points
 
@@ -43,9 +45,9 @@ class FlatInterferogramGenerator():
         self.maximum_deviation_nm = maximum_deviation_nm
         os.makedirs(self.save_path, exist_ok=True)
 
-        X, Y = np.meshgrid(np.arange(self.shape[1]), np.arange(self.shape[0]))
-        self.X = X - self.shape[1] // 2
-        self.Y = Y - self.shape[0] // 2
+        x, y = np.meshgrid(np.arange(self.shape[1]), np.arange(self.shape[0]))
+        self.X = x - self.shape[1] // 2
+        self.Y = y - self.shape[0] // 2
         self.r = np.sqrt(self.X**2 + self.Y**2)
         self.aperture_mask = self.r <= (self.diameter_pixels / 2)
 
@@ -97,12 +99,12 @@ class FlatInterferogramGenerator():
             indices_to_keep = np.random.choice(len(indices_in_mask), num_pixels_to_keep, replace=False)
             indices_to_keep = indices_in_mask[indices_to_keep]
 
-            Y_indices = np.arange(self.shape[0])[:, np.newaxis]
-            X_indices = np.arange(self.shape[1])[np.newaxis, :]
-            A = np.c_[indices_to_keep[:, 1], indices_to_keep[:, 0], np.ones(num_pixels_to_keep)]
+            y_indices = np.arange(self.shape[0])[:, np.newaxis]
+            x_indices = np.arange(self.shape[1])[np.newaxis, :]
+            a_matrix = np.c_[indices_to_keep[:, 1], indices_to_keep[:, 0], np.ones(num_pixels_to_keep)]
             b = surface[indices_to_keep[:, 0], indices_to_keep[:, 1]]
-            coeffs, _, _, _ = np.linalg.lstsq(A, b, rcond=None)
-            plane = (coeffs[0] * X_indices + coeffs[1] * Y_indices + coeffs[2])
+            coeffs, _, _, _ = np.linalg.lstsq(a_matrix, b, rcond=None)
+            plane = (coeffs[0] * x_indices + coeffs[1] * y_indices + coeffs[2])
             surface = surface - plane
 
         surface *= self.aperture_mask
@@ -117,10 +119,11 @@ class FlatInterferogramGenerator():
             plt.ylabel('Píxeles')
             plt.show()
 
-    def get_maximum_simulated_deviation_px(self, phase, plot=False):
+    def get_maximum_simulated_deviation_px(self, plot=False):
+        phase = self.current_phase.copy()
         phase[np.logical_not(self.aperture_mask)] = 0
         cos_phase = 1 + np.cos(phase)
-        contours = measure.find_contours(cos_phase, 0.01)
+        contours = measure.find_contours(cos_phase, 0.05)
         self.minima_curves = []
         if plot:
             plt.imshow(cos_phase, cmap='jet')
@@ -138,7 +141,6 @@ class FlatInterferogramGenerator():
             plt.ylabel('Píxeles')
             plt.colorbar(label='Intensidad')
             plt.show()
-        return
 
     def rotate_simulated_minima_curves(self):
         self.minima_curves = rotate_2d_points(self.minima_curves, -self.current_rotation_angle, self.shape)
@@ -147,9 +149,9 @@ class FlatInterferogramGenerator():
         kx = normalized_carrier_frequency
         ky = 0.0
 
-        phase = 2 * np.pi * (kx * self.X + ky * self.Y + self.surface)
-        self.get_maximum_simulated_deviation_px(phase, plot=False)
-        interferogram = 1 + self.visibility_ratio * np.cos(phase)
+        self.current_phase = 2 * np.pi * (kx * self.X + ky * self.Y + self.surface)
+        self.get_maximum_simulated_deviation_px(plot=False)
+        interferogram = 1 + self.visibility_ratio * np.cos(self.current_phase)
         interferogram *= self.aperture_mask
         interferogram = self.random_rotation(interferogram)
         interferogram += np.random.normal(0, 1, size=self.shape) * self.noise_level * self.visibility_ratio
@@ -161,7 +163,7 @@ class FlatInterferogramGenerator():
 
         return interferogram_uint8
 
-    def generate(self, num_samples=1, output_mode="files", simulation_mode="random", surface_options={}):
+    def generate(self, num_samples=1, output_mode="files", simulation_mode="random", surface_options=None):
         assert isinstance(num_samples, int) and num_samples > 0, "num_samples debe ser un entero positivo"
         self.produce_carrier_frequencies(num_samples)
         if simulation_mode == "random":
@@ -174,6 +176,7 @@ class FlatInterferogramGenerator():
             self.current_maximum_deviation_nm = self.maximum_deviation_nm
             surface_mode = "gaussian"
 
+        surface_options = surface_options if surface_options is not None else {}
         self.simulate_surface(mode=surface_mode, **surface_options)
 
         for i in range(num_samples):
