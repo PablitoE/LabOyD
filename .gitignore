@@ -9,3 +9,4 @@ Data/Resultados
 *.pyc
 /*.pdf
 **/.~*
+**/*.xlsx
