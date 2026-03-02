@@ -12,16 +12,26 @@ logger = logging.getLogger(__name__)
 
 
 class PDF(FPDF):
-    def __init__(self, datos_ot_rut, resource_path="resources/Certificados", font="helvetica"):
+    def __init__(self, datos_ot_rut, resource_path="resources/Certificados", font="helvetica", elements=None,
+                 key_aliases=None):
         super().__init__()
+        self.add_font("stix", "", os.path.join(resource_path, "fonts", "stix", "STIXGeneral-Regular.otf"), uni=True)
+        self.add_font("stix", "B", os.path.join(resource_path, "fonts", "stix", "STIXGeneral-Bold.otf"), uni=True)
+        self.add_font("stix", "I", os.path.join(resource_path, "fonts", "stix", "STIXGeneral-Italic.otf"), uni=True)
+        self.add_font("stix", "BI", os.path.join(resource_path, "fonts", "stix", "STIXGeneral-BoldItalic.otf"),
+                      uni=True)
+
         self.datos_ot_rut = datos_ot_rut
         self.resource_path = resource_path
         self.font = font
         self.alias_nb_pages()  # Funcion que hay que llamar para poder numerar las paginas tipon "1 de"
         self.set_auto_page_break(auto=True, margin=30)
-        self.set_top_margin(50)
+        self.set_top_margin(55)
 
         self.buffer_two_columns = ""  # Para almacenar temporalmente el texto de dos columnas
+        self.elements = elements  # Para almacenar información de elementos como tipo de muestra, identificación, etc.
+        self.elements_info = {}  # Para almacenar información procesada de elementos, evita procesamientos repetidos
+        self.key_aliases = key_aliases if key_aliases is not None else {}  # Para mapear claves más legibles en el texto
 
     def header(self):  # Encabezado
         # 1. Imagen de encabezado
@@ -88,17 +98,47 @@ class PDF(FPDF):
                     )
                 row_label += 1
 
-    def add_sections(self, df: DataFrame, vspace_from_title=2, vspace_after_text=0, center_title=False, font_size=10,
-                     font_size_title=12, font_size_two_columns=8.5, in_new_page=True) -> None:
+    def add_sections(self, df: DataFrame, vspace_before_title=2, vspace_from_title=2, vspace_after_text=0,
+                     center_title=False, font_size=10, font_size_title=12, font_size_two_columns=8.5,
+                     in_new_page=True) -> None:
+
+        """
+        Agrega secciones a un PDF desde un DataFrame.
+
+        Modos de interpretación del DataFrame:
+        Título: La primera columna del DataFrame debe contener el título de la sección, comenzando con "#".
+                Por ejemplo, "# Metodología Empleada".
+        Texto normal: Sólo primera columna con texto, sin formato especial. Si el texto comienza con "*", se interpreta
+                      como texto en negrita.
+        Texto en dos columnas: Si la segunda columna tiene el valor "two_columns", el texto de la primera columna se
+                              acumula hasta que se encuentra una fila que no tiene "two_columns" en la segunda columna.
+        Imágenes: Si la primera columna comienza con "_fig" y la segunda columna contiene el nombre de un archivo de
+                  imagen, se interpreta como una figura a insertar. El caption de la figura se toma del texto que sigue
+                  a "_fig" en la primera columna, y el ancho de la imagen se toma de la tercera columna.
+
+
+        Parameters
+        ----------
+        df : DataFrame
+        vspace_from_title : int, optional (mm, [2])
+        vspace_after_text : int, optional (mm, [0])
+        center_title : bool, optional [False]
+        font_size : int, optional [10]
+        font_size_title : int, optional [12]
+        font_size_two_columns : int, optional [8.5]
+        in_new_page : bool, optional [True]
+        """
         if in_new_page:
             self.add_page()
         if isinstance(df, list):
             df = pd.DataFrame(df)
         assert str(df.iloc[0, 0])[0] == "#", "La primera fila debe contener el título de la sección, comenzando con '#'"
+
         row = 0
         while row < len(df):
             if str(df.iloc[row, 0])[0:2] == "# ":
                 self.set_font(self.font, "B", size=font_size_title)
+                self.ln(vspace_before_title)
                 title = str(df.iloc[row, 0])[2:]
                 alignment = "C" if center_title else "L"
                 self.cell(0, 5, title, border=0, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align=alignment)
@@ -124,8 +164,29 @@ class PDF(FPDF):
                         self.buffer_two_columns = ""
                     else:
                         writing = False
-                else:
+                elif df.shape[1] > 1 and df.iloc[row, 1] == "**" and self.elements is not None:
+                    key, value = str(df.iloc[row, 2]).split(":", 1)
+                    key = key.strip()
+                    value = value.strip()
+                    if key not in self.elements_info:
+                        self.process_elements(key)
+                    if value in self.elements_info[key]:
+                        text = str(df.iloc[row, 0])
+                        self.multi_cell(0, 5, text, border=0, align="J")
+                elif df.shape[1] > 1 and df.iloc[row, 1] == "$$" and self.elements is not None:
+                    key, value = str(df.iloc[row, 2]).split(":", 1)
+                    key = key.strip()
+                    value = value.strip()
+                    base_text = str(df.iloc[row, 0])
+                    for element in self.elements:
+                        if key in element and value in element[key]:
+                            text = self.insert_values_into_text(base_text, element)
+                            self.multi_cell(0, 5, text, border=0, align="J")
+                            break
+                elif not pd.isna(df.iloc[row, 1]):
                     self.write_value_with_units(df.iloc[row, 0], df.iloc[row, 1])
+                else:
+                    raise ValueError(f"Fila {row} tiene formato inesperado: '{df.iloc[row, 0]}', '{df.iloc[row, 1]}'")
                 if vspace_after_text > 0 and writing:
                     self.ln(vspace_after_text)
             row += 1
@@ -207,3 +268,112 @@ class PDF(FPDF):
         y_final = max(y_final_col1, self.get_y())
         self.set_y(y_final)
         self.set_font(size=font_size_start)
+
+    def process_elements(self, key):
+        if key in self.elements_info:
+            return  # Ya procesamos este elemento antes, no es necesario hacerlo de nuevo
+        self.elements_info[key] = []
+        for element in self.elements:
+            value = element.get(key)
+            self.elements_info[key].append(value)
+        if not self.elements_info[key]:
+            self.elements_info[key] = None
+
+    def insert_values_into_text(self, base_text, list_of_dicts, sep="$"):
+        if isinstance(list_of_dicts, dict):
+            list_of_dicts = [list_of_dicts]
+        start_variable = 1 if base_text[0] != "$" else 0
+        text = base_text.split(sep)
+        for i in range(start_variable, len(text), 2):
+            for d in list_of_dicts:
+                if text[i] in self.key_aliases:
+                    actual_key = self.key_aliases[text[i]]
+                    value = self.deep_get(d, actual_key)
+                elif text[i] in d and d[text[i]] is not None:
+                    value = d[text[i]]
+                else:
+                    value = None
+                if value is not None:
+                    text[i] = str(value)
+                    break
+        return "".join(text)
+
+    @staticmethod
+    def deep_get(data, alias, default=None, sep="."):
+        """
+        Accede a una estructura anidada usando un string tipo "a.b.0.c".
+        Parameters
+        ----------
+        data : dict | list
+            Estructura donde buscar.
+        alias : str | list | dict
+            Ruta separada por `sep`.
+        default : any
+            Valor a devolver si alguna clave no existe.
+        sep : str
+            Separador de niveles (default ".").
+
+        Returns
+        -------
+        any
+            Valor encontrado o `default` si falla.
+        """
+        if isinstance(alias, str):
+            alias = {"op": None, "keys": alias}
+        if isinstance(alias["keys"], str):
+            alias["keys"] = [alias["keys"]]
+        output = []
+        for key_for_alias in alias["keys"]:
+            keys = key_for_alias.split(sep)
+            value = data
+            flag_all = False
+            for k in keys:
+                try:
+                    if k == ":":
+                        flag_all = isinstance(value, list)
+                        continue
+                    if isinstance(value, list):
+                        if flag_all:
+                            new_value = []
+                            for v in value:
+                                if v is not None and k in v:
+                                    new_value.append(v[k])
+                                else:
+                                    new_value.append(default)
+                            value = new_value
+                            continue
+                        k = int(k)  # acceso por índice
+                    value = value[k]
+                except (KeyError, IndexError, ValueError, TypeError):
+                    value = default
+            output.append(value)
+        if len(alias["keys"]) == 1:
+            return output[0]
+        if alias["op"] == "entre_a":
+            minimum = float("inf")
+            maximum = -float("inf")
+            for values in output:
+                if values is not None and isinstance(values, list):
+                    values = [v for v in values if v is not None]
+                    if not values:
+                        continue
+                    val_min = min(values)
+                    val_max = max(values)
+                    minimum = val_min if val_min < minimum else minimum
+                    maximum = val_max if val_max > maximum else maximum
+                elif values is not None:
+                    minimum = values if values < minimum else minimum
+                    maximum = values if values > maximum else maximum
+            if minimum < maximum:
+                return f"entre {minimum} a {maximum}"
+            else:
+                return f"{minimum}"
+
+        return output
+
+
+if __name__ == "__main__":
+    print(
+        "Este módulo define la clase PDF para generar certificados.",
+         " No se ejecuta nada al correr este archivo directamente."
+    )
