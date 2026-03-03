@@ -97,7 +97,8 @@ if __name__ == "__main__":
 
     # PÁGINA 2 de metodologia,Condiciones de medición y condiciones ambientales:
     # Para esta pagina hay que cambiar en el excel el valor del coeficiente de expansión
-    pdf.add_sections(df_metodologia, vspace_after_text=0.5)
+    df_table_fei = fei_data.build_table(elements)
+    pdf.add_sections(df_metodologia, vspace_after_text=0.5, table_dfs=df_table_fei)
 
     # PÁGINA 3: RESULTADOS (tabla)
     pdf.add_sections(["# Resultados", "Los resultados se indican en la Tabla 1:"], vspace_after_text=3)

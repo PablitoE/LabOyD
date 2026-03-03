@@ -61,3 +61,29 @@ class FEIReader:
             element['planitud_fei'] = fei_data[0] if len(fei_data) == 1 else fei_data
             element[id_key] = element[id_key][0] if len(element[id_key]) == 1 else element[id_key]
         return new_elements
+
+    @staticmethod
+    def build_table(elements):
+        df = pd.DataFrame(columns=["Marca/Modelo", "Identificación", "Cara", "Desviación de planitud / nm"])
+        for element in elements:
+            key_id = 'Identificacion_usuario'
+            sub_elements_ids = element[key_id] if isinstance(element[key_id], list) else [element[key_id]]
+            key_fei = 'planitud_fei'
+            sub_elements_fei = element[key_fei] if isinstance(element[key_fei], list) else [element[key_fei]]
+            for k_sub_element in range(len(sub_elements_ids)):
+                if sub_elements_fei[k_sub_element] is not None:
+                    new_rows = [{
+                        "Marca/Modelo": f"_{element['Marca']} {element['Code']}",
+                        "Identificación": f"_{sub_elements_ids[k_sub_element]}",
+                        "Cara": "Superior",
+                        "Desviación de planitud / nm": f"({sub_elements_fei[k_sub_element]['Cara_superior']['value']}"
+                        f" ± {sub_elements_fei[k_sub_element]['Cara_superior']['uncertainty']})"
+                    }, {
+                        "Marca/Modelo": f"_{element['Marca']} {element['Code']}",
+                        "Identificación": f"_{sub_elements_ids[k_sub_element]}",
+                        "Cara": "Inferior",
+                        "Desviación de planitud / nm": f"({sub_elements_fei[k_sub_element]['Cara_inferior']['value']}"
+                        f" ± {sub_elements_fei[k_sub_element]['Cara_inferior']['uncertainty']})"
+                    }]
+                    df = pd.concat([df, pd.DataFrame(new_rows)], ignore_index=True)
+        return df

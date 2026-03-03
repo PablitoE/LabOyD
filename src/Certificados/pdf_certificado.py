@@ -6,7 +6,7 @@ from fpdf import FPDF
 from fpdf.enums import XPos, YPos
 from pandas import DataFrame
 
-from src.Certificados.pdf_extras import balance_text
+from src.Certificados.pdf_extras import balance_text, estimate_lines
 
 logger = logging.getLogger(__name__)
 
@@ -15,6 +15,7 @@ class PDF(FPDF):
     def __init__(self, datos_ot_rut, resource_path="resources/Certificados", font="helvetica", elements=None,
                  key_aliases=None):
         super().__init__()
+        self.counter_table = 0
         self.add_font("stix", "", os.path.join(resource_path, "fonts", "stix", "STIXGeneral-Regular.otf"), uni=True)
         self.add_font("stix", "B", os.path.join(resource_path, "fonts", "stix", "STIXGeneral-Bold.otf"), uni=True)
         self.add_font("stix", "I", os.path.join(resource_path, "fonts", "stix", "STIXGeneral-Italic.otf"), uni=True)
@@ -100,7 +101,7 @@ class PDF(FPDF):
 
     def add_sections(self, df: DataFrame, vspace_before_title=2, vspace_from_title=2, vspace_after_text=0,
                      center_title=False, font_size=10, font_size_title=12, font_size_two_columns=8.5,
-                     in_new_page=True) -> None:
+                     in_new_page=True, table_dfs=None) -> None:
 
         """
         Agrega secciones a un PDF desde un DataFrame.
@@ -148,6 +149,16 @@ class PDF(FPDF):
                 file_path = os.path.join(self.resource_path, str(df.iloc[row, 1]))
                 width_mm = df.iloc[row, 2] if df.shape[1] > 2 and pd.notna(df.iloc[row, 2]) else None
                 self.add_figure(file_path, caption=caption, width_mm=width_mm)
+            elif str(df.iloc[row, 0])[0:4] == "_tab":
+                caption = str(df.iloc[row, 0])[4:].strip()
+                assert table_dfs is not None, "Se encontró una fila de tabla pero no se proporcionó 'table_dfs'"
+                if isinstance(table_dfs, list):
+                    assert len(table_dfs) > self.counter_table, "No hay suficientes DataFrames para las tablas"
+                    df_table = table_dfs[self.counter_table]
+                else:
+                    df_table = table_dfs
+
+                self.add_table_with_caption(df_table, caption, contains_multirows=True)
             elif not pd.isna(df.iloc[row, 0]):
                 self.set_font(self.font, "", size=font_size)
                 writing = True
@@ -198,8 +209,14 @@ class PDF(FPDF):
 
     def add_table_with_caption(
         self, df: DataFrame, caption: str, caption_height=10, vspace_after_table=3, fit_col_widths=True,
-        padding_lr=2, padding_tb=0, extra_width=0, row_height=5
+        padding_lr=2, padding_tb=0, extra_width=0, row_height=5, contains_multirows=False
     ):
+        """
+        Agrega una tabla a un PDF con un caption
+
+        Si una celda contiene un texto que termina con ">" se interpreta como una celda que abarca tantas columnas
+        adicionales como ">" tenga.
+        """
         self.set_font(self.font, "", size=10)
         self.cell(self.effective_page_width, caption_height, caption, border=0, new_x=XPos.LMARGIN, new_y=YPos.NEXT,
                   align="C")
@@ -218,20 +235,60 @@ class PDF(FPDF):
             col_widths = None
             total_width = self.effective_page_width
 
-        with self.table(
-            width=total_width, first_row_as_headings=True, text_align='C', line_height=row_height, align='C',
-            padding=(padding_tb, padding_lr), col_widths=col_widths
-        ) as table:
+        if contains_multirows:
+            start_x = self.effective_page_width / 2 - total_width / 2
+            self.set_xy(start_x, self.get_y())
             self.set_font(style="B")
-            row = table.row()
-            for col_name in df.columns:
-                row.cell(col_name)
-
+            n_ln = 1
+            for col_k, col_name in enumerate(df.columns):
+                this_n_ln, _ = estimate_lines(self, col_name, col_widths[col_k])
+                n_ln = max(n_ln, this_n_ln)
+            for col_k, col_name in enumerate(df.columns):
+                self.multi_cell(col_widths[col_k], row_height * n_ln, col_name, border=1, align="C",
+                                new_x=XPos.RIGHT, new_y=YPos.TOP)
+            self.set_xy(start_x, self.get_y() + row_height * n_ln)
             self.set_font(style="")
+            n_span_below = [0] * len(df.columns)
             for _, fila in df.iterrows():
+                n_span_right = 0
+                for col_k, val in enumerate(fila):
+                    do_continue = False
+                    if n_span_right > 0:
+                        n_span_right -= 1
+                        do_continue = True
+                    if n_span_below[col_k] > 0:
+                        n_span_below[col_k] -= 1
+                        do_continue = True
+                    if do_continue:
+                        continue
+                    val_str = str(val)
+                    n_span_right = len(val_str) - len(val_str.rstrip(">"))
+                    n_span_below[col_k] = len(val_str) - len(val_str.lstrip("_"))
+                    val_str = val_str.rstrip(">").lstrip("_")
+                    self.multi_cell(col_widths[col_k] * (n_span_right + 1), row_height * (n_span_below[col_k] + 1),
+                                    val_str, border=1, align="C", new_x=XPos.RIGHT, new_y=YPos.TOP)
+                self.set_xy(start_x, self.get_y() + row_height)
+        else:
+            with self.table(
+                width=total_width, first_row_as_headings=True, text_align='C', line_height=row_height, align='C',
+                padding=(padding_tb, padding_lr), col_widths=col_widths
+            ) as table:
+                self.set_font(style="B")
                 row = table.row()
-                for valor in fila:
-                    row.cell(str(valor))
+                for col_name in df.columns:
+                    row.cell(col_name)
+
+                self.set_font(style="")
+                for _, fila in df.iterrows():
+                    row = table.row()
+                    n_span = 0
+                    for valor in fila:
+                        if n_span > 0:
+                            n_span -= 1
+                            continue
+                        valor = str(valor)
+                        n_span = len(valor) - len(valor.rstrip(">"))
+                        row.cell(valor.rstrip(">"), colspan=n_span + 1)
         self.ln(vspace_after_table)
 
     def add_figure(self, filename, caption=None, width_mm=None, vspace_before_caption=2, vspace_after_figure=3):
