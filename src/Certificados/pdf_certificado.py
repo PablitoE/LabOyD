@@ -16,6 +16,7 @@ class PDF(FPDF):
                  key_aliases=None):
         super().__init__()
         self.counter_table = 0
+        self.tables = []
         self.add_font("stix", "", os.path.join(resource_path, "fonts", "stix", "STIXGeneral-Regular.otf"), uni=True)
         self.add_font("stix", "B", os.path.join(resource_path, "fonts", "stix", "STIXGeneral-Bold.otf"), uni=True)
         self.add_font("stix", "I", os.path.join(resource_path, "fonts", "stix", "STIXGeneral-Italic.otf"), uni=True)
@@ -150,15 +151,18 @@ class PDF(FPDF):
                 width_mm = df.iloc[row, 2] if df.shape[1] > 2 and pd.notna(df.iloc[row, 2]) else None
                 self.add_figure(file_path, caption=caption, width_mm=width_mm)
             elif str(df.iloc[row, 0])[0:4] == "_tab":
-                caption = str(df.iloc[row, 0])[4:].strip()
+                sep_index = str(df.iloc[row, 0]).find(" ")
+                ref = str(df.iloc[row, 0])[:sep_index]
+                caption = str(df.iloc[row, 0])[sep_index + 1:].strip()
                 assert table_dfs is not None, "Se encontró una fila de tabla pero no se proporcionó 'table_dfs'"
                 if isinstance(table_dfs, list):
                     assert len(table_dfs) > self.counter_table, "No hay suficientes DataFrames para las tablas"
                     df_table = table_dfs[self.counter_table]
                 else:
                     df_table = table_dfs
-
-                self.add_table_with_caption(df_table, caption, contains_multirows=True)
+                self.counter_table += 1
+                self.tables.append({"num": self.counter_table, "ref": ref})
+                self.add_table_with_caption(df_table, caption, contains_multirows=True, extra_width=2, row_height=12)
             elif not pd.isna(df.iloc[row, 0]):
                 self.set_font(self.font, "", size=font_size)
                 writing = True
@@ -208,7 +212,7 @@ class PDF(FPDF):
         self.ln(10)  # write_html no da salto de línea automático al final, hay que agregarlo
 
     def add_table_with_caption(
-        self, df: DataFrame, caption: str, caption_height=10, vspace_after_table=3, fit_col_widths=True,
+        self, df: DataFrame, caption: str, caption_height=10, vspace_after_table=5, fit_col_widths=True,
         padding_lr=2, padding_tb=0, extra_width=0, row_height=5, contains_multirows=False
     ):
         """
@@ -218,8 +222,8 @@ class PDF(FPDF):
         adicionales como ">" tenga.
         """
         self.set_font(self.font, "", size=10)
-        self.cell(self.effective_page_width, caption_height, caption, border=0, new_x=XPos.LMARGIN, new_y=YPos.NEXT,
-                  align="C")
+        caption = f"Tabla {self.counter_table}: {caption}"
+        self.cell(0, caption_height, caption, border=0, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align="C")
         if fit_col_widths:
             col_widths = []
             for col in df.columns:
@@ -229,14 +233,17 @@ class PDF(FPDF):
                     if val_width > max_content_width:
                         max_content_width = val_width
                 col_widths.append(max_content_width + 2 * padding_lr)  # Agregar un poco de padding
-            total_width = sum(col_widths) + extra_width * len(df.columns)  # Agregar espacio para los bordes
+            sum_col_widths = sum(col_widths)
+            proportional_widths = [width / sum_col_widths for width in col_widths]
+            total_width = sum_col_widths + extra_width * len(df.columns)  # Agregar espacio para los bordes
             total_width = self.effective_page_width if total_width > self.effective_page_width else total_width
+            col_widths = [width_ratio * total_width for width_ratio in proportional_widths]
         else:
             col_widths = None
             total_width = self.effective_page_width
 
         if contains_multirows:
-            start_x = self.effective_page_width / 2 - total_width / 2
+            start_x = self.w / 2 - total_width / 2
             self.set_xy(start_x, self.get_y())
             self.set_font(style="B")
             n_ln = 1
@@ -245,7 +252,8 @@ class PDF(FPDF):
                 n_ln = max(n_ln, this_n_ln)
             for col_k, col_name in enumerate(df.columns):
                 self.multi_cell(col_widths[col_k], row_height * n_ln, col_name, border=1, align="C",
-                                new_x=XPos.RIGHT, new_y=YPos.TOP)
+                                new_x=XPos.RIGHT, new_y=YPos.TOP, max_line_height=self.font_size,
+                                padding=(padding_tb, padding_lr))
             self.set_xy(start_x, self.get_y() + row_height * n_ln)
             self.set_font(style="")
             n_span_below = [0] * len(df.columns)
@@ -260,13 +268,15 @@ class PDF(FPDF):
                         n_span_below[col_k] -= 1
                         do_continue = True
                     if do_continue:
+                        self.set_x(self.get_x() + col_widths[col_k])
                         continue
                     val_str = str(val)
                     n_span_right = len(val_str) - len(val_str.rstrip(">"))
                     n_span_below[col_k] = len(val_str) - len(val_str.lstrip("_"))
                     val_str = val_str.rstrip(">").lstrip("_")
                     self.multi_cell(col_widths[col_k] * (n_span_right + 1), row_height * (n_span_below[col_k] + 1),
-                                    val_str, border=1, align="C", new_x=XPos.RIGHT, new_y=YPos.TOP)
+                                    val_str, border=1, align="C", new_x=XPos.RIGHT, new_y=YPos.TOP,
+                                    max_line_height=self.font_size, padding=(padding_tb, padding_lr))
                 self.set_xy(start_x, self.get_y() + row_height)
         else:
             with self.table(
