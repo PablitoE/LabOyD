@@ -17,6 +17,8 @@ class PDF(FPDF):
         super().__init__()
         self.counter_table = 0
         self.tables = []
+        self.counter_figure = 0
+        self.figures = []
         self.add_font("stix", "", os.path.join(resource_path, "fonts", "stix", "STIXGeneral-Regular.otf"), uni=True)
         self.add_font("stix", "B", os.path.join(resource_path, "fonts", "stix", "STIXGeneral-Bold.otf"), uni=True)
         self.add_font("stix", "I", os.path.join(resource_path, "fonts", "stix", "STIXGeneral-Italic.otf"), uni=True)
@@ -117,6 +119,7 @@ class PDF(FPDF):
         Imágenes: Si la primera columna comienza con "_fig" y la segunda columna contiene el nombre de un archivo de
                   imagen, se interpreta como una figura a insertar. El caption de la figura se toma del texto que sigue
                   a "_fig" en la primera columna, y el ancho de la imagen se toma de la tercera columna.
+        Tablas: Si la primera columna comienza con "_tab", se inserta una tabla usando un DataFrame de table_dfs.
 
 
         Parameters
@@ -129,6 +132,7 @@ class PDF(FPDF):
         font_size_title : int, optional [12]
         font_size_two_columns : int, optional [8.5]
         in_new_page : bool, optional [True]
+        table_dfs : list of DataFrames, optional
         """
         if in_new_page:
             self.add_page()
@@ -146,14 +150,14 @@ class PDF(FPDF):
                 self.cell(0, 5, title, border=0, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align=alignment)
                 self.ln(vspace_from_title)
             elif str(df.iloc[row, 0])[0:4] == "_fig" and pd.notna(df.iloc[row, 1]):
-                caption = str(df.iloc[row, 0])[4:].strip()
+                ref, caption = self.get_ref_caption(str(df.iloc[row, 0]))
                 file_path = os.path.join(self.resource_path, str(df.iloc[row, 1]))
                 width_mm = df.iloc[row, 2] if df.shape[1] > 2 and pd.notna(df.iloc[row, 2]) else None
+                self.counter_figure += 1
+                self.figures.append({"num": self.counter_figure, "ref": ref})
                 self.add_figure(file_path, caption=caption, width_mm=width_mm)
             elif str(df.iloc[row, 0])[0:4] == "_tab":
-                sep_index = str(df.iloc[row, 0]).find(" ")
-                ref = str(df.iloc[row, 0])[:sep_index]
-                caption = str(df.iloc[row, 0])[sep_index + 1:].strip()
+                ref, caption = self.get_ref_caption(str(df.iloc[row, 0]))
                 assert table_dfs is not None, "Se encontró una fila de tabla pero no se proporcionó 'table_dfs'"
                 if isinstance(table_dfs, list):
                     assert len(table_dfs) > self.counter_table, "No hay suficientes DataFrames para las tablas"
@@ -205,6 +209,13 @@ class PDF(FPDF):
                 if vspace_after_text > 0 and writing:
                     self.ln(vspace_after_text)
             row += 1
+
+    @staticmethod
+    def get_ref_caption(string: str):
+        sep_index = string.find(" ")
+        ref = string[:sep_index]
+        caption = string[sep_index + 1:].strip()
+        return ref, caption
 
     def write_value_with_units(self, value, html_units):
         expansion = f"{value} {html_units}"
@@ -307,10 +318,10 @@ class PDF(FPDF):
         x_center = self.l_margin + (self.effective_page_width - width_mm) / 2
         self.image(filename, x=x_center, w=width_mm)
 
-        if caption:
-            self.set_y(self.get_y() + vspace_before_caption)
-            self.set_font(self.font, style="I", size=9)
-            self.cell(w=self.effective_page_width, h=5, txt=caption, align="C", new_x="LMARGIN", new_y="NEXT")
+        caption = f"Figura {self.figure_count}: {caption}" if caption else f"Figura {self.figure_count}"
+        self.set_y(self.get_y() + vspace_before_caption)
+        self.set_font(self.font, style="I", size=9)
+        self.cell(w=self.effective_page_width, h=5, txt=caption, align="C", new_x="LMARGIN", new_y="NEXT")
         self.ln(vspace_after_figure)
 
     def add_balanced_text(self, width_col=None, gutter=6, font_size=10, **kwargs):
