@@ -3,7 +3,7 @@ import os
 import pandas as pd
 
 from src.Certificados.pdf_certificado import PDF
-from src.Certificados.template_planos import FEIReader
+from src.Certificados.template_planos import FEIReader, ToleranceReader
 
 nombre_archivo_excel = "resources/Certificados/template_planos.xlsx"
 nombre_certificado = "Data/certificado.pdf"
@@ -60,6 +60,8 @@ if __name__ == "__main__":
     df_incertidumbre_paralelismo = pd.read_excel(nombre_archivo_excel, sheet_name="Incert. paralelismo", header=None)
 
     df_planitud_tolerancia = pd.read_excel(nombre_archivo_excel, sheet_name="Planitud por Tolerancias", header=None)
+    tolerancia_data = ToleranceReader(df_planitud_tolerancia)
+    subfigs = tolerancia_data.prepare_subfigs(elements)
 
     df_planitud_fei = pd.read_excel(nombre_archivo_excel, sheet_name="Planitud Flecha-Interfranja", header=None)
     df_planitud_fei = df_planitud_fei.dropna(how="all")  # Eliminar filas completamente vacías
@@ -98,11 +100,7 @@ if __name__ == "__main__":
     # PÁGINA 2 de metodologia,Condiciones de medición y condiciones ambientales:
     # Para esta pagina hay que cambiar en el excel el valor del coeficiente de expansión
     df_table_fei = fei_data.build_table(elements)
-    pdf.add_sections(df_metodologia, vspace_after_text=0.5, table_dfs=df_table_fei)
-
-    # PÁGINA 3: RESULTADOS (tabla)
-    pdf.add_sections(["# Resultados", "Los resultados se indican en la Tabla 1:"], vspace_after_text=3)
-    # pdf.add_table_with_caption(df_para_word, "Tabla 1: Resultados de desviación al centro", extra_width=6)
+    pdf.add_sections(df_metodologia, vspace_after_text=0.5, table_dfs=df_table_fei, subfigs_dfs=subfigs)
 
     # PAGINA OBSERVACIONES
     pdf.add_sections(df_observaciones, vspace_after_text=3)

@@ -1,3 +1,5 @@
+import re
+
 from fpdf import FPDF
 
 
@@ -25,3 +27,7 @@ def balance_text(pdf: FPDF, text, width_col, **kwargs) -> tuple[str, str]:
 def estimate_lines(pdf: FPDF, text, width_col, **kwargs):
     lineas_simuladas = pdf.multi_cell(w=width_col, txt=text, split_only=True, **kwargs)
     return len(lineas_simuladas), lineas_simuladas
+
+
+def isnumeric_with_decimal(s: str):
+    return re.fullmatch(r'[-+]?\d+([.,]\d+)?', s)

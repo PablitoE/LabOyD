@@ -4,9 +4,10 @@ import os
 import pandas as pd
 from fpdf import FPDF
 from fpdf.enums import XPos, YPos
+from fpdf.image_parsing import get_img_info
 from pandas import DataFrame
 
-from src.Certificados.pdf_extras import balance_text, estimate_lines
+import src.Certificados.pdf_extras as extras
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +37,8 @@ class PDF(FPDF):
         self.elements = elements  # Para almacenar información de elementos como tipo de muestra, identificación, etc.
         self.elements_info = {}  # Para almacenar información procesada de elementos, evita procesamientos repetidos
         self.key_aliases = key_aliases if key_aliases is not None else {}  # Para mapear claves más legibles en el texto
+        self.current_iteration_total = None
+        self.current_iteration_element = None
 
     def header(self):  # Encabezado
         # 1. Imagen de encabezado
@@ -104,7 +107,7 @@ class PDF(FPDF):
 
     def add_sections(self, df: DataFrame, vspace_before_title=2, vspace_from_title=2, vspace_after_text=0,
                      center_title=False, font_size=10, font_size_title=12, font_size_two_columns=8.5,
-                     in_new_page=True, table_dfs=None) -> None:
+                     in_new_page=True, table_dfs=None, subfigs_dfs=None) -> None:
 
         """
         Agrega secciones a un PDF desde un DataFrame.
@@ -113,12 +116,17 @@ class PDF(FPDF):
         Título: La primera columna del DataFrame debe contener el título de la sección, comenzando con "#".
                 Por ejemplo, "# Metodología Empleada".
         Texto normal: Sólo primera columna con texto, sin formato especial. Si el texto comienza con "*", se interpreta
-                      como texto en negrita.
+                como texto en negrita.
         Texto en dos columnas: Si la segunda columna tiene el valor "two_columns", el texto de la primera columna se
-                              acumula hasta que se encuentra una fila que no tiene "two_columns" en la segunda columna.
+                acumula hasta que se encuentra una fila que no tiene "two_columns" en la segunda columna.
+        Texto condicional sin repetición: Si la segunda columna tiene "**", se interpreta como texto condicional a la
+                condición dada por la tercera columna.
+        Texto repetido y completado: Si la 2da columna tiene "$$", se interpreta como texto condicional a la condición
+                dada por la tercera columna y se repite tantas veces como elementos cumplan la condición. Los valores
+                solicitados en el texto encerrados por $$ se completan de los elementos disponibles.
         Imágenes: Si la primera columna comienza con "_fig" y la segunda columna contiene el nombre de un archivo de
-                  imagen, se interpreta como una figura a insertar. El caption de la figura se toma del texto que sigue
-                  a "_fig" en la primera columna, y el ancho de la imagen se toma de la tercera columna.
+                imagen, se interpreta como una figura a insertar. El caption de la figura se toma del texto que sigue
+                a "_fig" en la primera columna, y el ancho de la imagen se toma de la tercera columna.
         Tablas: Si la primera columna comienza con "_tab", se inserta una tabla usando un DataFrame de table_dfs.
 
 
@@ -150,12 +158,7 @@ class PDF(FPDF):
                 self.cell(0, 5, title, border=0, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align=alignment)
                 self.ln(vspace_from_title)
             elif str(df.iloc[row, 0])[0:4] == "_fig" and pd.notna(df.iloc[row, 1]):
-                ref, caption = self.get_ref_caption(str(df.iloc[row, 0]))
-                file_path = os.path.join(self.resource_path, str(df.iloc[row, 1]))
-                width_mm = df.iloc[row, 2] if df.shape[1] > 2 and pd.notna(df.iloc[row, 2]) else None
-                self.counter_figure += 1
-                self.figures.append({"num": self.counter_figure, "ref": ref})
-                self.add_figure(file_path, caption=caption, width_mm=width_mm)
+                self.process_figure_request(df.iloc[row], subfigs_dfs=subfigs_dfs)
             elif str(df.iloc[row, 0])[0:4] == "_tab":
                 ref, caption = self.get_ref_caption(str(df.iloc[row, 0]))
                 assert table_dfs is not None, "Se encontró una fila de tabla pero no se proporcionó 'table_dfs'"
@@ -184,24 +187,13 @@ class PDF(FPDF):
                     else:
                         writing = False
                 elif df.shape[1] > 1 and df.iloc[row, 1] == "**" and self.elements is not None:
-                    key, value = str(df.iloc[row, 2]).split(":", 1)
-                    key = key.strip()
-                    value = value.strip()
-                    if key not in self.elements_info:
-                        self.process_elements(key)
-                    if value in self.elements_info[key]:
-                        text = str(df.iloc[row, 0])
+                    assert '$' not in str(df.iloc[row, 0]), "El texto no puede contener '$' en un modo **"
+                    for text in self.process_condition(str(df.iloc[row, 0]), str(df.iloc[row, 2])):
                         self.multi_cell(0, 5, text, border=0, align="J")
+                        break
                 elif df.shape[1] > 1 and df.iloc[row, 1] == "$$" and self.elements is not None:
-                    key, value = str(df.iloc[row, 2]).split(":", 1)
-                    key = key.strip()
-                    value = value.strip()
-                    base_text = str(df.iloc[row, 0])
-                    for element in self.elements:
-                        if key in element and value in element[key]:
-                            text = self.insert_values_into_text(base_text, element)
-                            self.multi_cell(0, 5, text, border=0, align="J")
-                            break
+                    for text in self.process_condition(str(df.iloc[row, 0]), str(df.iloc[row, 2])):
+                        self.multi_cell(0, 5, text, border=0, align="J")
                 elif not pd.isna(df.iloc[row, 1]):
                     self.write_value_with_units(df.iloc[row, 0], df.iloc[row, 1])
                 else:
@@ -209,6 +201,53 @@ class PDF(FPDF):
                 if vspace_after_text > 0 and writing:
                     self.ln(vspace_after_text)
             row += 1
+
+    def process_condition(self, base_text: str, condition: str):
+        key, value = condition.split(":", 1)
+        key = key.strip()
+        value = value.strip()
+        self.process_elements(key)
+        self.current_iteration_total = len([x for x in self.elements_info[key] if x == value])
+        try:
+            for k_index, element in enumerate(self.elements):
+                self.current_iteration_element = k_index
+                if key in element and value in element[key]:
+                    yield self.insert_values_into_text(base_text, element)
+        finally:
+            self.current_iteration_total = None
+            self.current_iteration_element = None
+
+    def process_figure_request(self, df_row: pd.Series, subfigs_dfs=None):
+        ref, caption = self.get_ref_caption(str(df_row.iloc[0]))
+        path_or_subfigs = str(df_row.iloc[1])
+        maybe_tuple = self._parse_tuple(path_or_subfigs)
+        if maybe_tuple is None:
+            file_path = self.full_resource_path(path_or_subfigs)
+            subfigs_case = False
+        else:
+            assert subfigs_dfs is not None and len(subfigs_dfs) == len(self.elements), \
+                "Se encontró una figura con subfiguras pero no se proporcionó un 'subfigs_dfs' adecuado."
+            subfigs_rows_cols = [int(x) for x in maybe_tuple]
+            subfigs_case = True
+        width_mm = df_row.iloc[2] if len(df_row) > 2 and pd.notna(df_row.iloc[2]) else None
+        if len(df_row) > 3 and pd.notna(df_row.iloc[3]):
+            for k_element, text in enumerate(self.process_condition(caption, str(df_row.iloc[3]))):
+                self.counter_figure += 1
+                if self.current_iteration_total == 1:
+                    self.figures.append({"num": self.counter_figure, "ref": ref})
+                else:
+                    self.figures.append({"num": self.counter_figure, "ref": f"{ref}_{k_element + 1}"})
+                if subfigs_case:
+                    self.add_figure(subfigs_dfs[self.current_iteration_element], caption=text, width_mm=width_mm,
+                                    subfigs_rows_cols=subfigs_rows_cols)
+                else:
+                    self.add_figure(file_path, caption=text, width_mm=width_mm)
+
+    def full_resource_path(self, file_path):
+        if os.path.isabs(file_path):
+            return file_path
+        else:
+            return os.path.join(self.resource_path, file_path)
 
     @staticmethod
     def get_ref_caption(string: str):
@@ -259,7 +298,7 @@ class PDF(FPDF):
             self.set_font(style="B")
             n_ln = 1
             for col_k, col_name in enumerate(df.columns):
-                this_n_ln, _ = estimate_lines(self, col_name, col_widths[col_k])
+                this_n_ln, _ = extras.estimate_lines(self, col_name, col_widths[col_k])
                 n_ln = max(n_ln, this_n_ln)
             for col_k, col_name in enumerate(df.columns):
                 self.multi_cell(col_widths[col_k], row_height * n_ln, col_name, border=1, align="C",
@@ -312,13 +351,41 @@ class PDF(FPDF):
                         row.cell(valor.rstrip(">"), colspan=n_span + 1)
         self.ln(vspace_after_table)
 
-    def add_figure(self, filename, caption=None, width_mm=None, vspace_before_caption=2, vspace_after_figure=3):
-        if width_mm is None:
-            width_mm = self.effective_page_width * 0.8  # Por defecto, ocupar el 80% del ancho efectivo
+    def add_figure(self, filename, caption=None, width_mm=None, vspace_before_caption=2, vspace_after_figure=3,
+                   subfigs_rows_cols=None, subfigs_fill_ratio=0.9):
+        if width_mm is None or width_mm == 0:
+            width_mm = self.effective_page_width  # Por defecto, ocupar el ancho efectivo
         x_center = self.l_margin + (self.effective_page_width - width_mm) / 2
-        self.image(filename, x=x_center, w=width_mm)
+        if isinstance(filename, str) and os.path.isfile(filename):
+            self.image(filename, x=x_center, w=width_mm)
+        elif isinstance(filename, DataFrame) and subfigs_rows_cols is not None:
+            subfigs_dfs = filename
+            n_ims = len(subfigs_dfs)
+            assert subfigs_rows_cols is not None and subfigs_rows_cols[0] * subfigs_rows_cols[1] >= n_ims, \
+                "subfigs_rows_cols debe ser un par (n_rows, n_cols) tal que n_rows * n_cols >= n_ims"
+            assert 0 < subfigs_fill_ratio < 1, "subfigs_fill_ratio debe estar entre 0 y 1"
+            n_rows, n_cols = subfigs_rows_cols
+            w_ims = width_mm / n_cols * subfigs_fill_ratio
+            h_ims = []
+            for i in range(n_ims):
+                info = get_img_info(subfigs_dfs.at[i, "fullpath"])
+                h_ims.append(w_ims * info.height / info.width)
+            for row in range(n_rows):
+                h_ims_row = max(h_ims[row * n_cols:min(n_ims, (row + 1) * n_cols)]) / subfigs_fill_ratio
+                for col in range(n_cols):
+                    if row * n_cols + col >= n_ims:
+                        break
+                    self.image(subfigs_dfs.at[row * n_cols + col, "fullpath"], x=x_center + col * w_ims,
+                               y=self.get_y(), w=w_ims, h=h_ims_row, keep_aspect_ratio=True)
+                self.ln(h_ims_row)
 
-        caption = f"Figura {self.figure_count}: {caption}" if caption else f"Figura {self.figure_count}"
+        else:
+            raise ValueError(
+                "filename debe ser un archivo o una carpeta. subfigs_dfs y subfigs_rows_cols son necesarios si filename"
+                " es una carpeta."
+            )
+
+        caption = f"Figura {self.counter_figure}: {caption}" if caption else f"Figura {self.counter_figure}"
         self.set_y(self.get_y() + vspace_before_caption)
         self.set_font(self.font, style="I", size=9)
         self.cell(w=self.effective_page_width, h=5, txt=caption, align="C", new_x="LMARGIN", new_y="NEXT")
@@ -329,7 +396,7 @@ class PDF(FPDF):
         self.set_font(size=font_size)
         if width_col is None:
             width_col = (self.effective_page_width - gutter) / 2
-        texto_izq, texto_der = balance_text(self, self.buffer_two_columns, width_col=width_col, **kwargs)
+        texto_izq, texto_der = extras.balance_text(self, self.buffer_two_columns, width_col=width_col, **kwargs)
         x_col2 = self.l_margin + width_col + gutter  # Posición X para la segunda columna
         y_inicio = self.get_y()
 
@@ -354,8 +421,6 @@ class PDF(FPDF):
         for element in self.elements:
             value = element.get(key)
             self.elements_info[key].append(value)
-        if not self.elements_info[key]:
-            self.elements_info[key] = None
 
     def insert_values_into_text(self, base_text, list_of_dicts, sep="$"):
         if isinstance(list_of_dicts, dict):
@@ -448,6 +513,21 @@ class PDF(FPDF):
                 return f"{minimum}"
 
         return output
+
+    @staticmethod
+    def _parse_tuple(texto, n=2):
+        texto = texto.strip()
+        if not (texto.startswith("(") and texto.endswith(")")):
+            return None
+        contenido = texto[1:-1]
+        partes = contenido.split(",")
+        if n not in (None, 0) and len(partes) != n:
+            return None
+        try:
+            t = tuple([p.strip() for p in partes])
+            return t
+        except ValueError:
+            return None
 
 
 if __name__ == "__main__":
