@@ -3,7 +3,7 @@ import os
 import pandas as pd
 
 from src.Certificados.pdf_certificado import PDF
-from src.Certificados.template_planos import FEIReader, ToleranceReader
+from src.Certificados.template_planos import FEIReader, ParallelismReader, ToleranceReader
 
 nombre_archivo_excel = "resources/Certificados/template_planos.xlsx"
 nombre_certificado = "Data/certificado.pdf"
@@ -56,8 +56,8 @@ if __name__ == "__main__":
 
     # Distintos dataframes para las hojas
     df_paralelismo = pd.read_excel(nombre_archivo_excel, sheet_name="Paralelismo", header=None)
-
     df_incertidumbre_paralelismo = pd.read_excel(nombre_archivo_excel, sheet_name="Incert. paralelismo", header=None)
+    parallelism_data = ParallelismReader(df_paralelismo, df_incertidumbre_paralelismo)
 
     df_planitud_tolerancia = pd.read_excel(nombre_archivo_excel, sheet_name="Planitud por Tolerancias", header=None)
     tolerancia_data = ToleranceReader(df_planitud_tolerancia)
@@ -92,7 +92,7 @@ if __name__ == "__main__":
     # ----------------------------------------------------------------------------
     # Crear instancia del PDF
     datos_ot_rut = f"{df_especificaciones.iloc[0, 1]} {df_especificaciones.iloc[1, 1]} {df_especificaciones.iloc[2, 1]}"
-    pdf = PDF(datos_ot_rut, font="stix", elements=elements, key_aliases=key_aliases)
+    pdf = PDF(datos_ot_rut, font="Arial", elements=elements, key_aliases=key_aliases)
 
     # PÁGINA 1: CARÁTULA
     pdf.set_caratula(df_caratula, width_label=50, vspace=10)
@@ -100,7 +100,9 @@ if __name__ == "__main__":
     # PÁGINA 2 de metodologia,Condiciones de medición y condiciones ambientales:
     # Para esta pagina hay que cambiar en el excel el valor del coeficiente de expansión
     df_table_fei = fei_data.build_table(elements)
-    pdf.add_sections(df_metodologia, vspace_after_text=0.5, table_dfs=df_table_fei, subfigs_dfs=subfigs)
+    df_table_parallelism = parallelism_data.build_table(elements)
+    pdf.add_sections(df_metodologia, vspace_after_text=0.5, table_dfs=[df_table_fei, df_table_parallelism],
+                     subfigs_dfs=subfigs)
 
     # PAGINA OBSERVACIONES
     pdf.add_sections(df_observaciones, vspace_after_text=3)

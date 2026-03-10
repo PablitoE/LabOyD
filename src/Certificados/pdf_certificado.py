@@ -25,6 +25,11 @@ class PDF(FPDF):
         self.add_font("stix", "I", os.path.join(resource_path, "fonts", "stix", "STIXGeneral-Italic.otf"), uni=True)
         self.add_font("stix", "BI", os.path.join(resource_path, "fonts", "stix", "STIXGeneral-BoldItalic.otf"),
                       uni=True)
+        self.add_font("Arial", "", os.path.join(resource_path, "fonts", "arial", "Arial.ttf"), uni=True)
+        self.add_font("Arial", "B", os.path.join(resource_path, "fonts", "arial", "Arial_Bold.ttf"), uni=True)
+        self.add_font("Arial", "I", os.path.join(resource_path, "fonts", "arial", "Arial_Italic.ttf"), uni=True)
+        self.add_font("Arial", "BI", os.path.join(resource_path, "fonts", "arial", "Arial_Bold_Italic.ttf"),
+                      uni=True)
 
         self.datos_ot_rut = datos_ot_rut
         self.resource_path = resource_path
@@ -169,7 +174,7 @@ class PDF(FPDF):
                     df_table = table_dfs
                 self.counter_table += 1
                 self.tables.append({"num": self.counter_table, "ref": ref})
-                self.add_table_with_caption(df_table, caption, contains_multirows=True, extra_width=2, row_height=12)
+                self.add_table_with_caption(df_table, caption, contains_multirows=True, extra_width=4, row_height=10)
             elif not pd.isna(df.iloc[row, 0]):
                 self.set_font(self.font, "", size=font_size)
                 writing = True
@@ -271,7 +276,7 @@ class PDF(FPDF):
         Si una celda contiene un texto que termina con ">" se interpreta como una celda que abarca tantas columnas
         adicionales como ">" tenga.
         """
-        self.set_font(self.font, "", size=10)
+        self.set_font(self.font, style="I", size=10)
         caption = f"Tabla {self.counter_table}: {caption}"
         self.cell(0, caption_height, caption, border=0, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align="C")
         if fit_col_widths:
@@ -352,32 +357,50 @@ class PDF(FPDF):
         self.ln(vspace_after_table)
 
     def add_figure(self, filename, caption=None, width_mm=None, vspace_before_caption=2, vspace_after_figure=3,
-                   subfigs_rows_cols=None, subfigs_fill_ratio=0.9):
+                   subfigs_rows_cols=None, subfigs_hspace_ratio=0.05, subfigs_vspace_mm=2, subfigs_same_height=True,
+                   caption_height=5):
         if width_mm is None or width_mm == 0:
             width_mm = self.effective_page_width  # Por defecto, ocupar el ancho efectivo
         x_center = self.l_margin + (self.effective_page_width - width_mm) / 2
         if isinstance(filename, str) and os.path.isfile(filename):
+            info = get_img_info(filename)
+            height_mm = width_mm * info.height / info.width + 2 * caption_height
+            if self.get_y() + height_mm > self.h - self.b_margin:
+                self.add_page()
             self.image(filename, x=x_center, w=width_mm)
         elif isinstance(filename, DataFrame) and subfigs_rows_cols is not None:
             subfigs_dfs = filename
             n_ims = len(subfigs_dfs)
             assert subfigs_rows_cols is not None and subfigs_rows_cols[0] * subfigs_rows_cols[1] >= n_ims, \
                 "subfigs_rows_cols debe ser un par (n_rows, n_cols) tal que n_rows * n_cols >= n_ims"
-            assert 0 < subfigs_fill_ratio < 1, "subfigs_fill_ratio debe estar entre 0 y 1"
+            assert 0 < subfigs_hspace_ratio < 1, "subfigs_hspace_ratio debe estar entre 0 y 1"
             n_rows, n_cols = subfigs_rows_cols
-            w_ims = width_mm / n_cols * subfigs_fill_ratio
-            h_ims = []
+            w_ims_coarse = width_mm / (n_cols + (n_cols - 1) * subfigs_hspace_ratio)
+            hspace_between_bb = subfigs_hspace_ratio * w_ims_coarse
+            w_ims, h_ims = [], []
             for i in range(n_ims):
                 info = get_img_info(subfigs_dfs.at[i, "fullpath"])
-                h_ims.append(w_ims * info.height / info.width)
+                h_ims.append(info.height * w_ims_coarse / info.width)
+                w_ims.append(info.width)
+            h_ims_row = []
             for row in range(n_rows):
-                h_ims_row = max(h_ims[row * n_cols:min(n_ims, (row + 1) * n_cols)]) / subfigs_fill_ratio
+                h_ims_row.append(min(h_ims[row * n_cols:min(n_ims, (row + 1) * n_cols)]))
+            height_mm = sum(h_ims_row) + 2 * subfigs_vspace_mm + self.font_size + 2 * caption_height
+            if self.get_y() + height_mm > self.h - self.b_margin:
+                self.add_page()
+            for row, hrow in enumerate(h_ims_row):
+                y_row = self.get_y()
                 for col in range(n_cols):
                     if row * n_cols + col >= n_ims:
                         break
-                    self.image(subfigs_dfs.at[row * n_cols + col, "fullpath"], x=x_center + col * w_ims,
-                               y=self.get_y(), w=w_ims, h=h_ims_row, keep_aspect_ratio=True)
-                self.ln(h_ims_row)
+                    this_x = x_center + col * (w_ims_coarse + hspace_between_bb)
+                    self.image(subfigs_dfs.at[row * n_cols + col, "fullpath"],
+                               x=this_x,
+                               y=y_row, w=w_ims_coarse, h=hrow, keep_aspect_ratio=True)
+                    self.set_xy(this_x, y_row + hrow + subfigs_vspace_mm)
+                    self.multi_cell(w_ims_coarse, caption_height, subfigs_dfs.at[row * n_cols + col, "subcaption"],
+                                    align="C")
+                self.ln(subfigs_vspace_mm)
 
         else:
             raise ValueError(
@@ -388,7 +411,8 @@ class PDF(FPDF):
         caption = f"Figura {self.counter_figure}: {caption}" if caption else f"Figura {self.counter_figure}"
         self.set_y(self.get_y() + vspace_before_caption)
         self.set_font(self.font, style="I", size=9)
-        self.cell(w=self.effective_page_width, h=5, txt=caption, align="C", new_x="LMARGIN", new_y="NEXT")
+        self.multi_cell(w=self.effective_page_width, h=caption_height, txt=caption, align="C", new_x="LMARGIN",
+                        new_y="NEXT")
         self.ln(vspace_after_figure)
 
     def add_balanced_text(self, width_col=None, gutter=6, font_size=10, **kwargs):

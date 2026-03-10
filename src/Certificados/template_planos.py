@@ -167,3 +167,91 @@ class ToleranceReader:
                 df = pd.concat([df, pd.DataFrame(new_rows)], ignore_index=True)
             dfs.append(df)
         return dfs
+
+
+class ParallelismReader:
+    def __init__(self, df_values: pd.DataFrame, df_uncertainties: pd.DataFrame):
+        self.df_values = df_values
+        self.df_uncertainties = df_uncertainties
+        self.calibration_date = pd.to_datetime(self.df_values.iloc[2, 1], origin="1899-12-30", unit="D", dayfirst=True)
+        self.use_set = self.df_values.iloc[2, 16]
+        self.boxes, self.elements = self.get_elements()
+
+    def get_index_by_id(self, id):
+        for index, element in enumerate(self.elements):
+            if element['id'] == id:
+                return index
+        return None
+
+    def get_ufloat(self, index: int):
+        set = 'setA' if self.use_set == 'A' else 'setB'
+        return ufloat(self.elements[index][set]['deviation'], self.elements[index]['uncertainty'])
+
+    def get_elements(self):
+        elements = []
+        row = 6
+        box = []
+        box_elements = []
+        while row < self.df_values.shape[0]:
+            if 'Identificación' in str(self.df_values.iloc[row, 0]):
+                element = {
+                    "id": str(self.df_values.iloc[row + 1, 0]),
+                    "setA": self._read_measurement(row + 1, 1),
+                    "setB": self._read_measurement(row + 1, 13),
+                    "box": len(box)
+                    }
+                box_elements.append(element["id"])
+                elements.append(element)
+                row += 9
+            elif str(self.df_values.iloc[row, 0]).startswith('Tprom'):
+                box.append({
+                    "elements": box_elements.copy(),
+                    "temperature": self.df_values.iloc[row, 1],
+                    "humidity": self.df_values.iloc[row + 1, 1]
+                })
+                box_elements = []
+                row += 2
+            else:
+                row += 1
+
+        row = 0
+        element = 0
+        while row < self.df_uncertainties.shape[0]:
+            if 'repetibilidad' in str(self.df_uncertainties.iloc[row, 0]):
+                elements[element]["uncertainty"] = float(self.df_uncertainties.iloc[row + 6, 9]) / 1e3  # nm to µm
+                element += 1
+                row += 6
+            else:
+                row += 1
+        if element != len(elements):
+            raise ValueError("No se encontraron las incertidumbres de todos los elementos.")
+        return box, elements
+
+    def _read_measurement(self, row, col):
+        dev = float(self.df_values.iloc[row + 7, col + 2])
+        return {
+            "deviation": dev,
+        }
+
+    def build_table(self, elements):
+        df = pd.DataFrame(columns=["Marca/Modelo", "Identificación", "Desviación de paralelismo / µm"])
+        for element in elements:
+            if element["Paralelismo"] == "Si":
+                key_id = 'Identificacion_usuario'
+                sub_elements_ids = element[key_id] if isinstance(element[key_id], list) else [element[key_id]]
+                n_subelements = len(sub_elements_ids)
+                new_rows = []
+                for k_sub_element in range(len(sub_elements_ids)):
+                    if self.elements[k_sub_element] is not None:
+                        paralelismo = self.get_ufloat(self.get_index_by_id(sub_elements_ids[k_sub_element]))
+                        marca = (
+                            f'{"_" * (n_subelements - 1)}{element["Marca"]} {element["Code"]}'
+                            if k_sub_element == 0 else ''
+                        )
+                        new_rows.append({
+                            "Marca/Modelo": marca,
+                            "Identificación": f"{sub_elements_ids[k_sub_element]}",
+                            "Desviación de paralelismo / µm": "{:.2fp}".format(paralelismo).replace("+/-", " ± ")
+                        })
+                df = pd.concat([df, pd.DataFrame(new_rows)], ignore_index=True)
+        return df
