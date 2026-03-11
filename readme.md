@@ -4,11 +4,14 @@
 
 ### Certificados automáticos en PDF
 
-El script `certificado_bp.py` genera un certificado en formato PDF a partir de un template en Excel. El template se encuentra en la carpeta `resources/Certificados`. Las hojas de este template contienen la información necesaria para generar el certificado. En las hojas que se agregan mediante la función `add_sections`, existen varios comportamientos que se configuran mediante el contenido de las columnas de cada fila:
+Los scripts `certificado_bp.py` y `certificado_planos.py` son ejemplos de como generar un certificado en formato PDF a partir de un template en Excel. El template correspondiente a una medición debe ser compatible con las funcionalidades del paquete `Certificados` que se encuentra en la carpeta `src/Certificados`, y en el caso de ser necesario, con las clases de lectura como las que contiene `src/Certificados/template_planos.py`. Las clases de lectura se pueden tomar de ejemplo para otros futuros casos.
+Las hojas del template contienen la información necesaria para generar el certificado. La hoja `Especificaciones` contiene la información para obtener la carátula y una lista de los elementos calibrados. Los campos de cada elemento se traducen a pares `key:value` donde el key es la etiqueta de la columna A (tildes eliminadas y espacios reemplazados por `_`) y el value es el texto de la columna B. En las hojas que se agregan mediante la función `add_sections`, existen varios comportamientos que se configuran mediante el contenido de las columnas de cada fila:
 - Texto simple: Se imprime el texto de la columna A en la hoja.
 - Título: Se imprime el texto de la columna A en la hoja con un título. El texto debe comenzar con `#`.
 - Dos columnas: Se imprime el texto de las columna A en dos columnas. La columna B debe contener `two_columns`. Las filas consecutivas con `two_columns` se unen en un solo texto que se imprime en dos columnas.
 - Imagen: Se imprime la imagen con el nombre de archivo dado en la columna B (ubicado en la carpeta `resources/Certificados`). El texto de la columna A se imprime debajo de la imagen, pero debe comenzar con `_fig`, lo cual se ignora al imprimir. La columna C contiene el ancho de la imagen en mm.
+    - Figura con subfiguras: La figura se divide en subfiguras segun la cantidad de `(filas, columnas)` expresadas en la columna B. La columna C contiene el ancho de la figura en mm. El texto de la columna A se imprime debajo de la figura, pero debe comenzar con `_fig`, lo cual se ignora al imprimir. Puede contener `$key$` para modificar su comportamiento según el elemento procesado. La columna D contiene el par `key:value` de condición para procesar el elemento.
+- Tabla: Se imprime la tabla con el nombre de archivo dado en la columna A. Se debe proporcionar una lista de DataFrames para su generación.
 - Valor con unidades: Se imprime el texto de la columna A seguido del texto HTML de la columna B.
 
 ### keithley_data_reader.py
