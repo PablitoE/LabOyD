@@ -4,6 +4,55 @@ import pandas as pd
 from uncertainties import ufloat
 
 
+class SpecsReader:
+    def __init__(self, df: pd.DataFrame):
+        self.df = df
+        self.first_rows = ("TIPO TRABAJO", "Número", "Sub Trabajo", "Usuario", "Personal interviniente")
+        self.assert_job_data()
+        self.elements = []
+
+    def assert_job_data(self):
+        for i, expected_value in enumerate(self.first_rows):
+            assert self.df.iloc[i, 0].strip().startswith(expected_value), \
+                f"La fila {i+1} de la hoja 'Especificaciones' debe contener '{expected_value}' en la primera columna."
+        assert self.df.iloc[len(self.first_rows), 0].strip().startswith('TIPO MUESTRA'), (
+            'Luego de los datos deben haber elementos ingresados según plantilla.'
+        )
+
+    def get_elements(self):
+        new_element = None
+        for i in range(len(self.first_rows), len(self.df)):
+            if self.df.iloc[i, 0].strip() == 'TIPO MUESTRA':
+                if new_element is not None:
+                    self.elements.append(new_element)
+                if self.df.iloc[i, 2] == 'No':
+                    new_element = None
+                elif self.df.iloc[i, 2] == 'Si':
+                    if self.df.iloc[i, 1] in ('PLANO', 'JUEGO DE PARALELAS', 'PARALELA'):
+                        new_element = {'tipo_muestra': self.df.iloc[i, 1]}
+                    else:
+                        raise ValueError(f"Valor inesperado en 'TIPO MUESTRA': {self.df.iloc[i, 1]}")
+                else:
+                    raise ValueError(f"Valor inesperado en USO de 'TIPO MUESTRA': {self.df.iloc[i, 2]}")
+            elif new_element is not None:
+                key = self.df.iloc[i, 0].strip().replace(' ', '_').replace(':', '')
+                key = key.replace('á', 'a').replace('é', 'e').replace('í', 'i').replace('ó', 'o').replace('ú', 'u')
+                if key in new_element:
+                    raise ValueError(f"Clave duplicada '{key}' para el mismo tipo de muestra.")
+                if self.df.iloc[i, 0].strip().startswith('Identificación usuario'):
+                    new_element[key] = self.df.iloc[i, 1:].dropna().tolist()
+                    for index, value in enumerate(new_element[key]):
+                        if isinstance(value, float) and value.is_integer():
+                            new_element[key][index] = int(value)
+                    new_element[key] = [str(x).strip() for x in new_element[key]]
+                    if len(new_element[key]) == 1:
+                        new_element[key] = new_element[key][0]
+                else:
+                    new_element[key] = self.df.iloc[i, 1]
+        if new_element is not None:
+            self.elements.append(new_element)
+        return self.elements
+
 class FEIReader:
     def __init__(self, df: pd.DataFrame):
         self.df = df

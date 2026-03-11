@@ -2,8 +2,8 @@ import os
 
 import pandas as pd
 
+import src.Certificados.template_planos as tp
 from src.Certificados.pdf_certificado import PDF
-from src.Certificados.template_planos import FEIReader, ParallelismReader, ToleranceReader
 
 nombre_archivo_excel = "resources/Certificados/template_planos.xlsx"
 nombre_certificado = "Data/certificado.pdf"
@@ -13,59 +13,21 @@ if __name__ == "__main__":
     # Cargar el Excel
     df_especificaciones = pd.read_excel(nombre_archivo_excel, sheet_name="Especificaciones", header=None)
     df_especificaciones = df_especificaciones.dropna(how="all")  # Eliminar filas completamente vacías
-    first_rows = ["TIPO TRABAJO", "Número", "Sub Trabajo", "Usuario", "Personal interviniente"]
-    for i, expected_value in enumerate(first_rows):
-        assert df_especificaciones.iloc[i, 0].strip().startswith(expected_value), \
-            f"La fila {i+1} de la hoja 'Especificaciones' debe contener '{expected_value}' en la primera columna."
-    assert df_especificaciones.iloc[len(first_rows), 0].strip().startswith('TIPO MUESTRA'), (
-        'Luego de los datos deben haber elementos ingresados según plantilla.'
-    )
-
-    elements = []
-    new_element = None
-    for i in range(len(first_rows), len(df_especificaciones)):
-        if df_especificaciones.iloc[i, 0].strip() == 'TIPO MUESTRA':
-            if new_element is not None:
-                elements.append(new_element)
-            if df_especificaciones.iloc[i, 2] == 'No':
-                new_element = None
-            elif df_especificaciones.iloc[i, 2] == 'Si':
-                if df_especificaciones.iloc[i, 1] in ('PLANO', 'JUEGO DE PARALELAS', 'PARALELA'):
-                    new_element = {'tipo_muestra': df_especificaciones.iloc[i, 1]}
-                else:
-                    raise ValueError(f"Valor inesperado en 'TIPO MUESTRA': {df_especificaciones.iloc[i, 1]}")
-            else:
-                raise ValueError(f"Valor inesperado en USO de 'TIPO MUESTRA': {df_especificaciones.iloc[i, 2]}")
-        elif new_element is not None:
-            key = df_especificaciones.iloc[i, 0].strip().replace(' ', '_').replace(':', '')
-            key = key.replace('á', 'a').replace('é', 'e').replace('í', 'i').replace('ó', 'o').replace('ú', 'u')
-            if key in new_element:
-                raise ValueError(f"Clave duplicada '{key}' para el mismo tipo de muestra.")
-            if df_especificaciones.iloc[i, 0].strip().startswith('Identificación usuario'):
-                new_element[key] = df_especificaciones.iloc[i, 1:].dropna().tolist()
-                for index, value in enumerate(new_element[key]):
-                    if isinstance(value, float) and value.is_integer():
-                        new_element[key][index] = int(value)
-                new_element[key] = [str(x).strip() for x in new_element[key]]
-                if len(new_element[key]) == 1:
-                    new_element[key] = new_element[key][0]
-            else:
-                new_element[key] = df_especificaciones.iloc[i, 1]
-    if new_element is not None:
-        elements.append(new_element)
+    specs_data = tp.SpecsReader(df_especificaciones)
+    elements = specs_data.get_elements()
 
     # Distintos dataframes para las hojas
     df_paralelismo = pd.read_excel(nombre_archivo_excel, sheet_name="Paralelismo", header=None)
     df_incertidumbre_paralelismo = pd.read_excel(nombre_archivo_excel, sheet_name="Incert. paralelismo", header=None)
-    parallelism_data = ParallelismReader(df_paralelismo, df_incertidumbre_paralelismo)
+    parallelism_data = tp.ParallelismReader(df_paralelismo, df_incertidumbre_paralelismo)
 
     df_planitud_tolerancia = pd.read_excel(nombre_archivo_excel, sheet_name="Planitud por Tolerancias", header=None)
-    tolerancia_data = ToleranceReader(df_planitud_tolerancia)
+    tolerancia_data = tp.ToleranceReader(df_planitud_tolerancia)
     subfigs = tolerancia_data.prepare_subfigs(elements)
 
     df_planitud_fei = pd.read_excel(nombre_archivo_excel, sheet_name="Planitud Flecha-Interfranja", header=None)
     df_planitud_fei = df_planitud_fei.dropna(how="all")  # Eliminar filas completamente vacías
-    fei_data = FEIReader(df_planitud_fei)
+    fei_data = tp.FEIReader(df_planitud_fei)
     elements = fei_data.merge_with_elements(elements, "Identificacion_usuario")
     key_aliases = {
         "IMAGES_N": {"op": "entre_a",
