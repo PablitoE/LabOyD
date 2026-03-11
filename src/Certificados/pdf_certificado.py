@@ -156,6 +156,10 @@ class PDF(FPDF):
         row = 0
         while row < len(df):
             if str(df.iloc[row, 0])[0:2] == "# ":
+                predicted_text_y = (self.get_y() + vspace_before_title + self._pt2mm(font_size_title)
+                    + vspace_from_title + self._pt2mm(font_size))
+                if predicted_text_y > self.h - self.b_margin:
+                    self.add_page()
                 self.set_font(self.font, "B", size=font_size_title)
                 self.ln(vspace_before_title)
                 title = str(df.iloc[row, 0])[2:]
@@ -552,6 +556,10 @@ class PDF(FPDF):
             return t
         except ValueError:
             return None
+
+    @staticmethod
+    def _pt2mm(pt):
+        return pt * 0.352875
 
 
 if __name__ == "__main__":

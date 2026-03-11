@@ -89,6 +89,9 @@ if __name__ == "__main__":
     # Dataframe secciones Metodología empleada,Condiciones de medición y Condiciones ambientales
     df_metodologia = pd.read_excel(nombre_archivo_excel, sheet_name="METODOLOGIA", header=None)
 
+    # Dataframe secciones de Resultados
+    df_resultados = pd.read_excel(nombre_archivo_excel, sheet_name="RESULTADOS", header=None)
+
     # ----------------------------------------------------------------------------
     # Crear instancia del PDF
     datos_ot_rut = f"{df_especificaciones.iloc[0, 1]} {df_especificaciones.iloc[1, 1]} {df_especificaciones.iloc[2, 1]}"
@@ -99,13 +102,15 @@ if __name__ == "__main__":
 
     # PÁGINA 2 de metodologia,Condiciones de medición y condiciones ambientales:
     # Para esta pagina hay que cambiar en el excel el valor del coeficiente de expansión
+    pdf.add_sections(df_metodologia, vspace_after_text=0.5)
+
     df_table_fei = fei_data.build_table(elements)
     df_table_parallelism = parallelism_data.build_table(elements)
-    pdf.add_sections(df_metodologia, vspace_after_text=0.5, table_dfs=[df_table_fei, df_table_parallelism],
-                     subfigs_dfs=subfigs)
+    pdf.add_sections(df_resultados, vspace_after_text=3, table_dfs=[df_table_fei, df_table_parallelism],
+                     subfigs_dfs=subfigs, in_new_page=False)
 
     # PAGINA OBSERVACIONES
-    pdf.add_sections(df_observaciones, vspace_after_text=3)
+    pdf.add_sections(df_observaciones, vspace_after_text=3, in_new_page=False)
 
     # PÁGINA CIPM-MRA
     pdf.add_sections(df_mra, vspace_after_text=3, vspace_from_title=8, center_title=True, font_size_title=14)
