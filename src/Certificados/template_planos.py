@@ -7,9 +7,15 @@ from uncertainties import ufloat
 class SpecsReader:
     def __init__(self, df: pd.DataFrame):
         self.df = df
-        self.first_rows = ("TIPO TRABAJO", "Número", "Sub Trabajo", "Usuario", "Personal interviniente")
+        self.first_rows = ("TIPO TRABAJO", "Número", "Sub Trabajo", "Usuario", "Personal interviniente",
+                           "LONGITUD DE ONDA", "Incertidumbre LAMBDA")
         self.assert_job_data()
         self.elements = []
+        self.get_elements()
+
+        self.diameter_bigger_than_reference = False
+        self.check_diameters()
+        self.add_general_data()
 
     def assert_job_data(self):
         for i, expected_value in enumerate(self.first_rows):
@@ -52,6 +58,27 @@ class SpecsReader:
         if new_element is not None:
             self.elements.append(new_element)
         return self.elements
+
+    def check_diameters(self):
+        for element in self.elements:
+            if "Diametro" in element and "Diametro_referencia" in element:
+                self.diameter_bigger_than_reference = element["Diametro"] > element["Diametro_referencia"]
+                if self.diameter_bigger_than_reference:
+                    break
+
+    def add_general_data(self):
+        self.general_info = {
+            "diametro_menor": "Si" if self.diameter_bigger_than_reference else "No",
+            "Longitud_de_onda": '{:.1up}'.format(self.get_lambda()).replace('+/-', ' ± ').replace('.', ',')
+        }
+
+    def get_lambda(self):
+        for _, row in self.df.iterrows():
+            if row[0] == 'LONGITUD DE ONDA':
+                value = row[1]
+            if row[0] == 'Incertidumbre LAMBDA':
+                uncertainty = row[1]
+        return ufloat(value, uncertainty)
 
 class FEIReader:
     def __init__(self, df: pd.DataFrame):
@@ -97,6 +124,8 @@ class FEIReader:
         new_elements = elements.copy()
         for element in new_elements:
             assert isinstance(element, dict), "Cada elemento debe ser un diccionario"
+            if id_key not in element:
+                continue
             fei_data = []
             if isinstance(element[id_key], str):  # If the id_key is a string, it's a single element
                 element[id_key] = [element[id_key]]
@@ -119,6 +148,8 @@ class FEIReader:
         df = pd.DataFrame(columns=["Marca/Modelo", "Identificación", "Cara", "Desviación de planitud / nm"])
         for element in elements:
             key_id = 'Identificacion_usuario'
+            if key_id not in element:
+                continue
             sub_elements_ids = element[key_id] if isinstance(element[key_id], list) else [element[key_id]]
             key_fei = 'planitud_fei'
             sub_elements_fei = element[key_fei] if isinstance(element[key_fei], list) else [element[key_fei]]
@@ -128,17 +159,22 @@ class FEIReader:
                                            sub_elements_fei[k_sub_element]['Cara_superior']['uncertainty'])
                     cara_inferior = ufloat(sub_elements_fei[k_sub_element]['Cara_inferior']['value'],
                                            sub_elements_fei[k_sub_element]['Cara_inferior']['uncertainty'])
-                    new_rows = [{
-                        "Marca/Modelo": f"_{element['Marca']} {element['Code']}",
-                        "Identificación": f"_{sub_elements_ids[k_sub_element]}",
-                        "Cara": "Superior",
-                        "Desviación de planitud / nm": "{:.2up}".format(cara_superior).replace("+/-", " ± ")
-                    }, {
-                        "Marca/Modelo": f"_{element['Marca']} {element['Code']}",
-                        "Identificación": f"_{sub_elements_ids[k_sub_element]}",
-                        "Cara": "Inferior",
-                        "Desviación de planitud / nm": "{:.2up}".format(cara_inferior).replace("+/-", " ± ")
-                    }]
+                    new_rows = [
+                        {
+                            'Marca/Modelo': f'_{element["Marca"]} {element["Code"]}',
+                            'Identificación': f'_{sub_elements_ids[k_sub_element]}',
+                            'Cara': 'Superior',
+                            'Desviación de planitud / nm': '{:.2up}'.format(cara_superior)
+                            .replace('+/-', ' ± ').replace('.', ','),
+                        },
+                        {
+                            'Marca/Modelo': f'_{element["Marca"]} {element["Code"]}',
+                            'Identificación': f'_{sub_elements_ids[k_sub_element]}',
+                            'Cara': 'Inferior',
+                            'Desviación de planitud / nm': '{:.2up}'.format(cara_inferior)
+                            .replace('+/-', ' ± ').replace('.', ','),
+                        },
+                    ]
                     df = pd.concat([df, pd.DataFrame(new_rows)], ignore_index=True)
         return df
 
@@ -188,7 +224,7 @@ class ToleranceReader:
         elements_ids = [element['id'] for element in self.elements]
         dfs = []
         for element in all_elements:
-            if element["Metodo_planitud"] != "Tolerancia":
+            if "Metodo_planitud" not in element or element["Metodo_planitud"] != "Tolerancia":
                 dfs.append(None)
                 continue
             df = pd.DataFrame(columns=["Identificación", "subcaption", "fullpath"])
@@ -222,9 +258,16 @@ class ParallelismReader:
     def __init__(self, df_values: pd.DataFrame, df_uncertainties: pd.DataFrame):
         self.df_values = df_values
         self.df_uncertainties = df_uncertainties
-        self.calibration_date = pd.to_datetime(self.df_values.iloc[2, 1], origin="1899-12-30", unit="D", dayfirst=True)
+        self.calibration_date = self.get_calibration_date(self.df_values.iloc[2, 1])
         self.use_set = self.df_values.iloc[2, 16]
         self.boxes, self.elements = self.get_elements()
+
+    def get_calibration_date(self, value):
+        if isinstance(value, str):
+            string = value.replace("/", "-")
+            return pd.to_datetime(string, dayfirst=True)
+        elif isinstance(value, int):
+            return pd.to_datetime(value, origin="1899-12-30", unit="D", dayfirst=True)
 
     def get_index_by_id(self, id):
         for index, element in enumerate(self.elements):
@@ -285,6 +328,8 @@ class ParallelismReader:
     def build_table(self, elements):
         df = pd.DataFrame(columns=["Marca/Modelo", "Identificación", "Desviación de paralelismo / µm"])
         for element in elements:
+            if "Paralelismo" not in element or element["Paralelismo"] != "Si":
+                continue
             if element["Paralelismo"] == "Si":
                 key_id = 'Identificacion_usuario'
                 sub_elements_ids = element[key_id] if isinstance(element[key_id], list) else [element[key_id]]
@@ -300,7 +345,8 @@ class ParallelismReader:
                         new_rows.append({
                             "Marca/Modelo": marca,
                             "Identificación": f"{sub_elements_ids[k_sub_element]}",
-                            "Desviación de paralelismo / µm": "{:.2fp}".format(paralelismo).replace("+/-", " ± ")
+                            "Desviación de paralelismo / µm": "{:.2fp}".format(paralelismo)
+                            .replace("+/-", " ± ").replace(".", ",")
                         })
                 df = pd.concat([df, pd.DataFrame(new_rows)], ignore_index=True)
         return df

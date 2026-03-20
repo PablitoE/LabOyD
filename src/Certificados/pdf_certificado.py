@@ -7,14 +7,14 @@ from fpdf.enums import XPos, YPos
 from fpdf.image_parsing import get_img_info
 from pandas import DataFrame
 
-import src.Certificados.pdf_extras as extras
+import Certificados.pdf_extras as extras
 
 logger = logging.getLogger(__name__)
 
 
 class PDF(FPDF):
     def __init__(self, datos_ot_rut, resource_path="resources/Certificados", font="helvetica", elements=None,
-                 key_aliases=None):
+                 key_aliases=None, general_info=None):
         super().__init__()
         self.counter_table = 0
         self.tables = []
@@ -41,6 +41,7 @@ class PDF(FPDF):
         self.buffer_two_columns = ""  # Para almacenar temporalmente el texto de dos columnas
         self.elements = elements  # Para almacenar información de elementos como tipo de muestra, identificación, etc.
         self.elements_info = {}  # Para almacenar información procesada de elementos, evita procesamientos repetidos
+        self.general_info = general_info
         self.key_aliases = key_aliases if key_aliases is not None else {}  # Para mapear claves más legibles en el texto
         self.current_iteration_total = None
         self.current_iteration_element = None
@@ -196,7 +197,6 @@ class PDF(FPDF):
                     else:
                         writing = False
                 elif df.shape[1] > 1 and df.iloc[row, 1] == "**" and self.elements is not None:
-                    assert '$' not in str(df.iloc[row, 0]), "El texto no puede contener '$' en un modo **"
                     for text in self.process_condition(str(df.iloc[row, 0]), str(df.iloc[row, 2])):
                         self.multi_cell(0, 5, text, border=0, align="J")
                         break
@@ -211,17 +211,22 @@ class PDF(FPDF):
                     self.ln(vspace_after_text)
             row += 1
 
-    def process_condition(self, base_text: str, condition: str):
+    def process_condition(self, base_text: str, condition: str, behavior: str = "**"):
         key, value = condition.split(":", 1)
         key = key.strip()
         value = value.strip()
         self.process_elements(key)
-        self.current_iteration_total = len([x for x in self.elements_info[key] if x == value])
+        self.current_iteration_total = len(
+            [x for x in self.elements_info[key] if x == value or (value == 'Any' and isinstance(x, str))]
+        )
+        n_this_value = self.current_iteration_total if behavior == "**" else None
+        n_other_values = len([x for x in self.elements_info[key] if x != value and x is not None and value != "Any"])
         try:
             for k_index, element in enumerate(self.elements):
                 self.current_iteration_element = k_index
-                if key in element and value in element[key]:
-                    yield self.insert_values_into_text(base_text, element)
+                if key in element and (value in element[key] or value == "Any"):
+                    yield self.insert_values_into_text(base_text, [element, self.general_info], n=n_this_value,
+                                                       n_not=n_other_values)
         finally:
             self.current_iteration_total = None
             self.current_iteration_element = None
@@ -450,24 +455,69 @@ class PDF(FPDF):
             value = element.get(key)
             self.elements_info[key].append(value)
 
-    def insert_values_into_text(self, base_text, list_of_dicts, sep="$"):
+    def insert_values_into_text(self, base_text, list_of_dicts, sep="$", sep_n="*", sep_not="/", n=1, n_not=0):
+        """
+            Replace:
+                $<key>$ -> <value>
+                *n == 1:n > 1*
+                /only if n_not >= 1/
+        """
         if isinstance(list_of_dicts, dict):
             list_of_dicts = [list_of_dicts]
-        start_variable = 1 if base_text[0] != "$" else 0
-        text = base_text.split(sep)
-        for i in range(start_variable, len(text), 2):
-            for d in list_of_dicts:
-                if text[i] in self.key_aliases:
-                    actual_key = self.key_aliases[text[i]]
-                    value = self.deep_get(d, actual_key)
-                elif text[i] in d and d[text[i]] is not None:
-                    value = d[text[i]]
+        parts, types = self._parse_seps(base_text, (sep, sep_n, sep_not))
+        for i in range(len(parts)):
+            if types[i][-1] == sep:
+                for d in list_of_dicts:
+                    if parts[i] in self.key_aliases:
+                        actual_key = self.key_aliases[parts[i]]
+                        value = self.deep_get(d, actual_key)
+                    elif parts[i] in d and d[parts[i]] is not None:
+                        value = d[parts[i]]
+                    else:
+                        value = None
+                    if value is not None:
+                        parts[i] = str(value)
+                        break
+            if types[i][0] == sep_n:
+                options = parts[i].split(":")
+                assert len(options) == 2
+                parts[i] = options[0] if n == 1 else options[1]
+            if types[i][0] == sep_not:
+                if n_not == 0:
+                    parts[i] = ""
+        return "".join(parts)
+
+    @staticmethod
+    def _parse_seps(text: str, seps: tuple):
+        parts = []
+        types = []
+        this_str = ""
+        this_type = "text"
+        escape = False
+
+        for char in text:
+            if not escape and char == "\\":
+                escape = True
+                continue
+            if char in seps and not escape:
+                if this_str:
+                    parts.append(this_str)
+                    types.append(this_type)
+                this_str = ""
+                if this_type == "text":
+                    this_type = char
+                elif this_type[-1] == char:
+                    this_type = this_type[:-1] if len(this_type) > 1 else "text"
                 else:
-                    value = None
-                if value is not None:
-                    text[i] = str(value)
-                    break
-        return "".join(text)
+                    this_type += char
+            else:
+                this_str += char
+                if escape:
+                    escape = False
+        if this_type == "text" and this_str:
+            parts.append(this_str)
+            types.append(this_type)
+        return parts, types
 
     @staticmethod
     def deep_get(data, alias, default=None, sep="."):
@@ -560,6 +610,11 @@ class PDF(FPDF):
     @staticmethod
     def _pt2mm(pt):
         return pt * 0.352875
+
+    def append_element(self, element):
+        if self.elements is None:
+            self.elements = []
+        self.elements.append(element)
 
 
 if __name__ == "__main__":

@@ -1,3 +1,7 @@
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "LabOyD"
 version = "0.1.0"
@@ -6,6 +10,15 @@ requires-python = ">=3.8"
 dependencies = [
     "numpy", "pandas", "fpdf2", "openpyxl"
 ]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[project.optional-dependencies]
+dev = ["ruff", "pytest", "pytest-cov"]
 
 [tool.ruff]
 line-length = 120
@@ -28,3 +41,6 @@ exclude = [
 
 [tool.ruff.format]
 quote-style = "single"
+
+[tool.pytest.ini_options]
+pythonpath = "src"

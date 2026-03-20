@@ -2,11 +2,11 @@ import os
 
 import pandas as pd
 
-import src.Certificados.template_planos as tp
-from src.Certificados.pdf_certificado import PDF
+import Certificados.template_planos as tp
+from Certificados.pdf_certificado import PDF
 
-nombre_archivo_excel = "resources/Certificados/template_planos.xlsx"
-nombre_certificado = "Data/certificado.pdf"
+nombre_archivo_excel = "/home/pablo/OneDrive/Documentos/INTI-Calibraciones/Planos/OT 13241 LCGI 2026/medicion 13241 LCGI.xlsx"
+nombre_certificado = "/home/pablo/OneDrive/Documentos/INTI-Calibraciones/Planos/OT 13241 LCGI 2026/certificado.pdf"
 
 
 if __name__ == "__main__":
@@ -14,7 +14,7 @@ if __name__ == "__main__":
     df_especificaciones = pd.read_excel(nombre_archivo_excel, sheet_name="Especificaciones", header=None)
     df_especificaciones = df_especificaciones.dropna(how="all")  # Eliminar filas completamente vacías
     specs_data = tp.SpecsReader(df_especificaciones)
-    elements = specs_data.get_elements()
+    elements = specs_data.elements
 
     # Distintos dataframes para las hojas
     df_paralelismo = pd.read_excel(nombre_archivo_excel, sheet_name="Paralelismo", header=None)
@@ -56,8 +56,12 @@ if __name__ == "__main__":
 
     # ----------------------------------------------------------------------------
     # Crear instancia del PDF
-    datos_ot_rut = f"{df_especificaciones.iloc[0, 1]} {df_especificaciones.iloc[1, 1]} {df_especificaciones.iloc[2, 1]}"
-    pdf = PDF(datos_ot_rut, font="Arial", elements=elements, key_aliases=key_aliases)
+    datos_ot_rut = (
+        f'{df_especificaciones.iloc[0, 1]} N° {df_especificaciones.iloc[1, 1]} {df_especificaciones.iloc[2, 1]}'
+    )
+    pdf = PDF(
+        datos_ot_rut, font='Arial', elements=elements, key_aliases=key_aliases, general_info=specs_data.general_info
+    )
 
     # PÁGINA 1: CARÁTULA
     pdf.set_caratula(df_caratula, width_label=50, vspace=10)

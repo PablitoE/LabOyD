@@ -11,3 +11,4 @@ Data/*
 /*.pdf
 **/.~*
 **/*.xlsx
+**/*.egg-info
