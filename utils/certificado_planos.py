@@ -1,3 +1,4 @@
+import argparse
 import os
 
 import pandas as pd
@@ -5,11 +6,20 @@ import pandas as pd
 import Certificados.template_planos as tp
 from Certificados.pdf_certificado import PDF
 
-nombre_archivo_excel = "/home/pablo/OneDrive/Documentos/INTI-Calibraciones/Planos/OT 13241 LCGI 2026/medicion 13241 LCGI.xlsx"
-nombre_certificado = "/home/pablo/OneDrive/Documentos/INTI-Calibraciones/Planos/OT 13241 LCGI 2026/certificado.pdf"
-
-
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("-e", "--excel-path", help="Path absoluto del archivo Excel que contiene el template")
+    parser.add_argument(
+        '-c', '--cert-path',
+        help='Path relativo a la ubicación del archivo Excel que contiene el template con el nombre del certificado.',
+        default="certificado.pdf"
+    )
+    args = parser.parse_args()
+    nombre_archivo_excel = args.excel_path
+    assert os.path.exists(args.excel_path), f"El archivo Excel {args.excel_path} no existe"
+    nombre_certificado = os.path.join(os.path.dirname(args.excel_path), args.cert_path)
+    assert nombre_certificado.endswith(".pdf"), "El nombre del certificado debe terminar con .pdf"
+
     # Cargar el Excel
     df_especificaciones = pd.read_excel(nombre_archivo_excel, sheet_name="Especificaciones", header=None)
     df_especificaciones = df_especificaciones.dropna(how="all")  # Eliminar filas completamente vacías
@@ -21,9 +31,12 @@ if __name__ == "__main__":
     df_incertidumbre_paralelismo = pd.read_excel(nombre_archivo_excel, sheet_name="Incert. paralelismo", header=None)
     parallelism_data = tp.ParallelismReader(df_paralelismo, df_incertidumbre_paralelismo)
 
-    df_planitud_tolerancia = pd.read_excel(nombre_archivo_excel, sheet_name="Planitud por Tolerancias", header=None)
-    tolerancia_data = tp.ToleranceReader(df_planitud_tolerancia)
-    subfigs = tolerancia_data.prepare_subfigs(elements)
+    if specs_data.do_tolerance():
+        df_planitud_tolerancia = pd.read_excel(nombre_archivo_excel, sheet_name="Planitud por Tolerancias", header=None)
+        tolerancia_data = tp.ToleranceReader(df_planitud_tolerancia)
+        subfigs = tolerancia_data.prepare_subfigs(elements)
+    else:
+        subfigs = []
 
     df_planitud_fei = pd.read_excel(nombre_archivo_excel, sheet_name="Planitud Flecha-Interfranja", header=None)
     df_planitud_fei = df_planitud_fei.dropna(how="all")  # Eliminar filas completamente vacías

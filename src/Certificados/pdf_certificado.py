@@ -16,10 +16,6 @@ class PDF(FPDF):
     def __init__(self, datos_ot_rut, resource_path="resources/Certificados", font="helvetica", elements=None,
                  key_aliases=None, general_info=None):
         super().__init__()
-        self.counter_table = 0
-        self.tables = []
-        self.counter_figure = 0
-        self.figures = []
         self.add_font("stix", "", os.path.join(resource_path, "fonts", "stix", "STIXGeneral-Regular.otf"), uni=True)
         self.add_font("stix", "B", os.path.join(resource_path, "fonts", "stix", "STIXGeneral-Bold.otf"), uni=True)
         self.add_font("stix", "I", os.path.join(resource_path, "fonts", "stix", "STIXGeneral-Italic.otf"), uni=True)
@@ -45,6 +41,36 @@ class PDF(FPDF):
         self.key_aliases = key_aliases if key_aliases is not None else {}  # Para mapear claves más legibles en el texto
         self.current_iteration_total = None
         self.current_iteration_element = None
+
+        if self.general_info is None:
+            self.general_info = {}
+        self.counter_table = 0
+        self.tables = []
+        self.counter_figure = 0
+        self.figures = []
+
+    @property
+    def counter_table(self):
+        return self._counter_table
+
+    @counter_table.setter
+    def counter_table(self, value):
+        self._counter_table = value
+        self.general_info["tab_this"] = value
+        self.general_info["tab_next"] = value + 1
+        self.general_info["tab_prev"] = value - 1
+
+    @property
+    def counter_figure(self):
+        return self._counter_figure
+
+    @counter_figure.setter
+    def counter_figure(self, value):
+        self._counter_figure = value
+        self.general_info["fig_this"] = value
+        self.general_info["fig_next"] = value + 1
+        self.general_info["fig_prev"] = value - 1
+
 
     def header(self):  # Encabezado
         # 1. Imagen de encabezado
@@ -95,7 +121,8 @@ class PDF(FPDF):
                     data = [df.iloc[row_label, 1]]
                     row_data = row_label + 1
                     while row_data < len(df) and pd.isna(df.iloc[row_data, 0]) and not pd.isna(df.iloc[row_data, 1]):
-                        data.append(df.iloc[row_data, 1])
+                        value = "" if "\\" == str(df.iloc[row_data, 1]) else df.iloc[row_data, 1]
+                        data.append(value)
                         row_data += 1
                     value = "\n".join(map(str, data))
                     self.set_font(self.font, "B", 10)
@@ -239,8 +266,9 @@ class PDF(FPDF):
             file_path = self.full_resource_path(path_or_subfigs)
             subfigs_case = False
         else:
-            assert subfigs_dfs is not None and len(subfigs_dfs) == len(self.elements), \
-                "Se encontró una figura con subfiguras pero no se proporcionó un 'subfigs_dfs' adecuado."
+            if subfigs_dfs:
+                assert len(subfigs_dfs) == len(self.elements), \
+                    "Se encontró una figura con subfiguras pero no se proporcionó un 'subfigs_dfs' adecuado."
             subfigs_rows_cols = [int(x) for x in maybe_tuple]
             subfigs_case = True
         width_mm = df_row.iloc[2] if len(df_row) > 2 and pd.notna(df_row.iloc[2]) else None

@@ -4,9 +4,22 @@ import pandas as pd
 from uncertainties import ufloat
 
 
-class SpecsReader:
-    def __init__(self, df: pd.DataFrame):
+class TemplateSheetReader:
+    def __init__(self, df: pd.DataFrame, path_template=None):
         self.df = df
+        self.path_template = path_template
+
+    def get_calibration_date(self, value):
+        if isinstance(value, str):
+            string = value.replace("/", "-")
+            return pd.to_datetime(string, dayfirst=True)
+        elif isinstance(value, int):
+            return pd.to_datetime(value, origin="1899-12-30", unit="D", dayfirst=True)
+
+
+class SpecsReader(TemplateSheetReader):
+    def __init__(self, df: pd.DataFrame, path_template=None):
+        super().__init__(df, path_template)
         self.first_rows = ("TIPO TRABAJO", "Número", "Sub Trabajo", "Usuario", "Personal interviniente",
                            "LONGITUD DE ONDA", "Incertidumbre LAMBDA")
         self.assert_job_data()
@@ -69,8 +82,14 @@ class SpecsReader:
     def add_general_data(self):
         self.general_info = {
             "diametro_menor": "Si" if self.diameter_bigger_than_reference else "No",
-            "Longitud_de_onda": '{:.1up}'.format(self.get_lambda()).replace('+/-', ' ± ').replace('.', ',')
+            "Longitud_de_onda": '{:.1up}'.format(self.get_lambda()).replace('+/-', ' ± ').replace('.', ','),
         }
+
+    def do_tolerance(self):
+        for element in self.elements:
+            if "Metodo_planitud" in element and element["Metodo_planitud"] == "Si":
+                return True
+        return False
 
     def get_lambda(self):
         for _, row in self.df.iterrows():
@@ -80,10 +99,10 @@ class SpecsReader:
                 uncertainty = row[1]
         return ufloat(value, uncertainty)
 
-class FEIReader:
-    def __init__(self, df: pd.DataFrame):
-        self.df = df
-        self.calibration_date = pd.to_datetime(self.df.iloc[1, 1], origin="1899-12-30", unit="D", dayfirst=True)
+class FEIReader(TemplateSheetReader):
+    def __init__(self, df: pd.DataFrame, path_template=None):
+        super().__init__(df, path_template)
+        self.calibration_date = self.get_calibration_date(self.df.iloc[1, 1])
         self.elements = self.get_elements()
 
     def get_elements(self):
@@ -179,10 +198,10 @@ class FEIReader:
         return df
 
 
-class ToleranceReader:
-    def __init__(self, df: pd.DataFrame):
-        self.df = df
-        self.calibration_date = pd.to_datetime(self.df.iloc[1, 1], origin="1899-12-30", unit="D", dayfirst=True)
+class ToleranceReader(TemplateSheetReader):
+    def __init__(self, df: pd.DataFrame, path_template=None):
+        super().__init__(df, path_template)
+        self.calibration_date = self.get_calibration_date(self.df.iloc[1, 1])
         self.dir = []
         self.elements = self.get_elements()
 
@@ -206,7 +225,9 @@ class ToleranceReader:
                 row += 2
             elif str(self.df.iloc[row, 0]).startswith('Directorio'):
                 self.dir.append(self.df.iloc[row, 1])
-                assert os.path.isdir(self.dir[-1]), f"El directorio {self.dir} no existe"
+                if self.dir[-1][0] != os.sep:
+                    self.dir[-1] = os.path.join(self.path_template, self.dir[-1])
+                assert os.path.isdir(self.dir[-1]), f"El directorio {self.dir[-1]} no existe"
                 box += 1
                 row += 1
             else:
@@ -254,20 +275,14 @@ class ToleranceReader:
         return dfs
 
 
-class ParallelismReader:
-    def __init__(self, df_values: pd.DataFrame, df_uncertainties: pd.DataFrame):
+class ParallelismReader(TemplateSheetReader):
+    def __init__(self, df_values: pd.DataFrame, df_uncertainties: pd.DataFrame, path_template=None):
+        super().__init__(df_values, path_template)
         self.df_values = df_values
         self.df_uncertainties = df_uncertainties
         self.calibration_date = self.get_calibration_date(self.df_values.iloc[2, 1])
         self.use_set = self.df_values.iloc[2, 16]
         self.boxes, self.elements = self.get_elements()
-
-    def get_calibration_date(self, value):
-        if isinstance(value, str):
-            string = value.replace("/", "-")
-            return pd.to_datetime(string, dayfirst=True)
-        elif isinstance(value, int):
-            return pd.to_datetime(value, origin="1899-12-30", unit="D", dayfirst=True)
 
     def get_index_by_id(self, id):
         for index, element in enumerate(self.elements):
