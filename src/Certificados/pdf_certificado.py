@@ -140,7 +140,7 @@ class PDF(FPDF):
 
     def add_sections(self, df: DataFrame, vspace_before_title=2, vspace_from_title=2, vspace_after_text=0,
                      center_title=False, font_size=10, font_size_title=12, font_size_two_columns=8.5,
-                     in_new_page=True, table_dfs=None, subfigs_dfs=None) -> None:
+                     in_new_page=True, table_dfs=None, subfigs_dfs=None, figures_options=None) -> None:
 
         """
         Agrega secciones a un PDF desde un DataFrame.
@@ -195,43 +195,52 @@ class PDF(FPDF):
                 self.cell(0, 5, title, border=0, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align=alignment)
                 self.ln(vspace_from_title)
             elif str(df.iloc[row, 0])[0:4] == "_fig" and pd.notna(df.iloc[row, 1]):
-                self.process_figure_request(df.iloc[row], subfigs_dfs=subfigs_dfs)
+                figures_options = figures_options if figures_options is not None else {}
+                self.process_figure_request(df.iloc[row], subfigs_dfs=subfigs_dfs, **figures_options)
             elif str(df.iloc[row, 0])[0:4] == "_tab":
-                ref, caption = self.get_ref_caption(str(df.iloc[row, 0]))
-                assert table_dfs is not None, "Se encontró una fila de tabla pero no se proporcionó 'table_dfs'"
-                if isinstance(table_dfs, list):
-                    assert len(table_dfs) > self.counter_table, "No hay suficientes DataFrames para las tablas"
-                    df_table = table_dfs[self.counter_table]
-                else:
-                    df_table = table_dfs
-                self.counter_table += 1
-                self.tables.append({"num": self.counter_table, "ref": ref})
-                self.add_table_with_caption(df_table, caption, contains_multirows=True, extra_width=4, row_height=10)
+                for tab_text in self.process_condition(str(df.iloc[row, 0]), str(df.iloc[row, 1])):
+                    ref, caption = self.get_ref_caption(tab_text)
+                    assert table_dfs is not None, "Se encontró una fila de tabla pero no se proporcionó 'table_dfs'"
+                    if isinstance(table_dfs, list):
+                        assert len(table_dfs) > self.counter_table, "No hay suficientes DataFrames para las tablas"
+                        df_table = table_dfs[self.counter_table]
+                    else:
+                        df_table = table_dfs
+                    self.counter_table += 1
+                    self.tables.append({"num": self.counter_table, "ref": ref})
+                    self.add_table_with_caption(
+                        df_table, caption, contains_multirows=True, extra_width=4, row_height=10
+                    )
+                    writing = True
+                    break
             elif not pd.isna(df.iloc[row, 0]):
                 self.set_font(self.font, "", size=font_size)
-                writing = True
+                writing = False
                 if df.shape[1] == 1 or pd.isna(df.iloc[row, 1]):
                     text = str(df.iloc[row, 0])
                     if text.startswith("*"):
                         text = text[1:].strip()
                         self.set_font(style="B")
                     self.multi_cell(0, 5, text, border=0, align="J")
+                    writing = True
                 elif df.shape[1] > 1 and df.iloc[row, 1] == "two_columns":
                     self.buffer_two_columns += str(df.iloc[row, 0]) + "\n"
                     if row + 1 >= len(df) or df.iloc[row + 1, 1] != "two_columns":
                         self.add_balanced_text(font_size=font_size_two_columns, h=5, align="J")
                         self.buffer_two_columns = ""
-                    else:
-                        writing = False
+                        writing = True
                 elif df.shape[1] > 1 and df.iloc[row, 1] == "**" and self.elements is not None:
                     for text in self.process_condition(str(df.iloc[row, 0]), str(df.iloc[row, 2])):
                         self.multi_cell(0, 5, text, border=0, align="J")
+                        writing = True
                         break
                 elif df.shape[1] > 1 and df.iloc[row, 1] == "$$" and self.elements is not None:
                     for text in self.process_condition(str(df.iloc[row, 0]), str(df.iloc[row, 2])):
                         self.multi_cell(0, 5, text, border=0, align="J")
+                        writing = True
                 elif not pd.isna(df.iloc[row, 1]):
                     self.write_value_with_units(df.iloc[row, 0], df.iloc[row, 1])
+                    writing = True
                 else:
                     raise ValueError(f"Fila {row} tiene formato inesperado: '{df.iloc[row, 0]}', '{df.iloc[row, 1]}'")
                 if vspace_after_text > 0 and writing:
@@ -258,7 +267,7 @@ class PDF(FPDF):
             self.current_iteration_total = None
             self.current_iteration_element = None
 
-    def process_figure_request(self, df_row: pd.Series, subfigs_dfs=None):
+    def process_figure_request(self, df_row: pd.Series, subfigs_dfs=None, **kwargs):
         ref, caption = self.get_ref_caption(str(df_row.iloc[0]))
         path_or_subfigs = str(df_row.iloc[1])
         maybe_tuple = self._parse_tuple(path_or_subfigs)
@@ -281,9 +290,9 @@ class PDF(FPDF):
                     self.figures.append({"num": self.counter_figure, "ref": f"{ref}_{k_element + 1}"})
                 if subfigs_case:
                     self.add_figure(subfigs_dfs[self.current_iteration_element], caption=text, width_mm=width_mm,
-                                    subfigs_rows_cols=subfigs_rows_cols)
+                                    subfigs_rows_cols=subfigs_rows_cols, **kwargs)
                 else:
-                    self.add_figure(file_path, caption=text, width_mm=width_mm)
+                    self.add_figure(file_path, caption=text, width_mm=width_mm, **kwargs)
 
     def full_resource_path(self, file_path):
         if os.path.isabs(file_path):
@@ -394,8 +403,7 @@ class PDF(FPDF):
         self.ln(vspace_after_table)
 
     def add_figure(self, filename, caption=None, width_mm=None, vspace_before_caption=2, vspace_after_figure=3,
-                   subfigs_rows_cols=None, subfigs_hspace_ratio=0.05, subfigs_vspace_mm=2, subfigs_same_height=True,
-                   caption_height=5):
+                   subfigs_rows_cols=None, subfigs_hspace_ratio=0.05, subfigs_vspace_mm=2, caption_height=5):
         if width_mm is None or width_mm == 0:
             width_mm = self.effective_page_width  # Por defecto, ocupar el ancho efectivo
         x_center = self.l_margin + (self.effective_page_width - width_mm) / 2
@@ -422,7 +430,7 @@ class PDF(FPDF):
             h_ims_row = []
             for row in range(n_rows):
                 h_ims_row.append(min(h_ims[row * n_cols:min(n_ims, (row + 1) * n_cols)]))
-            height_mm = sum(h_ims_row) + 2 * subfigs_vspace_mm + self.font_size + 2 * caption_height
+            height_mm = sum(h_ims_row) + subfigs_vspace_mm * (n_rows - 1) + self.font_size + 2 * caption_height
             if self.get_y() + height_mm > self.h - self.b_margin:
                 self.add_page()
             for row, hrow in enumerate(h_ims_row):

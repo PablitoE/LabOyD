@@ -23,31 +23,33 @@ if __name__ == "__main__":
     # Cargar el Excel
     df_especificaciones = pd.read_excel(nombre_archivo_excel, sheet_name="Especificaciones", header=None)
     df_especificaciones = df_especificaciones.dropna(how="all")  # Eliminar filas completamente vacías
-    specs_data = tp.SpecsReader(df_especificaciones)
+    specs_data = tp.SpecsReader(df_especificaciones, path_template=nombre_archivo_excel)
     elements = specs_data.elements
 
     # Distintos dataframes para las hojas
     df_paralelismo = pd.read_excel(nombre_archivo_excel, sheet_name="Paralelismo", header=None)
     df_incertidumbre_paralelismo = pd.read_excel(nombre_archivo_excel, sheet_name="Incert. paralelismo", header=None)
-    parallelism_data = tp.ParallelismReader(df_paralelismo, df_incertidumbre_paralelismo)
+    parallelism_data = tp.ParallelismReader(df_paralelismo, df_incertidumbre_paralelismo, path_template=nombre_archivo_excel)
 
-    if specs_data.do_tolerance():
+    if specs_data.has_element("Metodo_planitud", "Tolerancia"):
         df_planitud_tolerancia = pd.read_excel(nombre_archivo_excel, sheet_name="Planitud por Tolerancias", header=None)
-        tolerancia_data = tp.ToleranceReader(df_planitud_tolerancia)
+        tolerancia_data = tp.ToleranceReader(df_planitud_tolerancia, path_template=nombre_archivo_excel)
         subfigs = tolerancia_data.prepare_subfigs(elements)
     else:
         subfigs = []
 
-    df_planitud_fei = pd.read_excel(nombre_archivo_excel, sheet_name="Planitud Flecha-Interfranja", header=None)
-    df_planitud_fei = df_planitud_fei.dropna(how="all")  # Eliminar filas completamente vacías
-    fei_data = tp.FEIReader(df_planitud_fei)
-    elements = fei_data.merge_with_elements(elements, "Identificacion_usuario")
-    key_aliases = {
-        "IMAGES_N": {"op": "entre_a",
-                     "keys": ["planitud_fei.:.Cara_superior.n_ims",
-                              "planitud_fei.:.Cara_inferior.n_ims"],
+    key_aliases = {}
+    if specs_data.has_element("Metodo_planitud", "Flecha-Interfranja"):
+        df_planitud_fei = pd.read_excel(nombre_archivo_excel, sheet_name="Planitud Flecha-Interfranja", header=None)
+        df_planitud_fei = df_planitud_fei.dropna(how="all")  # Eliminar filas completamente vacías
+        fei_data = tp.FEIReader(df_planitud_fei)
+        elements = fei_data.merge_with_elements(elements, "Identificacion_usuario")
+        key_aliases["IMAGES_N"] = {
+            "op": "entre_a",
+            "keys": ["planitud_fei.:.Cara_superior.n_ims", "planitud_fei.:.Cara_inferior.n_ims"],
         }
-    }
+    else:
+        fei_data = None
 
     # DataFrame con cosas para la caratula:
     df_caratula = pd.read_excel(nombre_archivo_excel, sheet_name="CARATULA", header=None)
@@ -83,10 +85,13 @@ if __name__ == "__main__":
     # Para esta pagina hay que cambiar en el excel el valor del coeficiente de expansión
     pdf.add_sections(df_metodologia, vspace_after_text=0.5)
 
-    df_table_fei = fei_data.build_table(elements)
-    df_table_parallelism = parallelism_data.build_table(elements)
-    pdf.add_sections(df_resultados, vspace_after_text=3, table_dfs=[df_table_fei, df_table_parallelism],
-                     subfigs_dfs=subfigs, in_new_page=False)
+    tables = []
+    if fei_data is not None:
+        tables.append(fei_data.build_table(elements))
+    if parallelism_data is not None:
+        tables.append(parallelism_data.build_table(elements))
+    pdf.add_sections(df_resultados, vspace_after_text=3, table_dfs=tables, subfigs_dfs=subfigs, in_new_page=False,
+                     figures_options={"subfigs_vspace_mm": 1})
 
     # PAGINA OBSERVACIONES
     pdf.add_sections(df_observaciones, vspace_after_text=3, in_new_page=False)

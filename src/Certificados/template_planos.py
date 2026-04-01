@@ -8,6 +8,7 @@ class TemplateSheetReader:
     def __init__(self, df: pd.DataFrame, path_template=None):
         self.df = df
         self.path_template = path_template
+        self.dir_template = os.path.dirname(path_template) if path_template is not None else None
 
     def get_calibration_date(self, value):
         if isinstance(value, str):
@@ -85,9 +86,9 @@ class SpecsReader(TemplateSheetReader):
             "Longitud_de_onda": '{:.1up}'.format(self.get_lambda()).replace('+/-', ' ± ').replace('.', ','),
         }
 
-    def do_tolerance(self):
+    def has_element(self, key, value):
         for element in self.elements:
-            if "Metodo_planitud" in element and element["Metodo_planitud"] == "Si":
+            if key in element and element[key] == value:
                 return True
         return False
 
@@ -226,7 +227,7 @@ class ToleranceReader(TemplateSheetReader):
             elif str(self.df.iloc[row, 0]).startswith('Directorio'):
                 self.dir.append(self.df.iloc[row, 1])
                 if self.dir[-1][0] != os.sep:
-                    self.dir[-1] = os.path.join(self.path_template, self.dir[-1])
+                    self.dir[-1] = os.path.join(self.dir_template, self.dir[-1])
                 assert os.path.isdir(self.dir[-1]), f"El directorio {self.dir[-1]} no existe"
                 box += 1
                 row += 1
@@ -257,8 +258,12 @@ class ToleranceReader(TemplateSheetReader):
                 dirpath = self.dir[self.elements[element_index]['box']]
                 files_in_dir = os.listdir(dirpath)
                 basenames = [os.path.splitext(file)[0] for file in files_in_dir]
-                file_sup = files_in_dir[basenames.index(self.elements[element_index]['Cara_superior']['archivo'])]
-                file_inf = files_in_dir[basenames.index(self.elements[element_index]['Cara_inferior']['archivo'])]
+                if self.elements[element_index]['Cara_superior']['archivo'].endswith('.png'):
+                    list_for_search = files_in_dir
+                else:
+                    list_for_search = basenames
+                file_sup = files_in_dir[list_for_search.index(self.elements[element_index]['Cara_superior']['archivo'])]
+                file_inf = files_in_dir[list_for_search.index(self.elements[element_index]['Cara_inferior']['archivo'])]
                 new_rows = [{
                     "Identificación": f"{id}",
                     "cara": "Superior",
