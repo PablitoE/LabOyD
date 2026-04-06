@@ -17,12 +17,16 @@ class TemplateSheetReader:
         elif isinstance(value, int):
             return pd.to_datetime(value, origin="1899-12-30", unit="D", dayfirst=True)
 
+    def remove_comments(self):
+        self.df = self.df[self.df.iloc[:, 0] != '#']
+
 
 class SpecsReader(TemplateSheetReader):
     def __init__(self, df: pd.DataFrame, path_template=None):
         super().__init__(df, path_template)
         self.first_rows = ("TIPO TRABAJO", "Número", "Sub Trabajo", "Usuario", "Personal interviniente",
                            "LONGITUD DE ONDA", "Incertidumbre LAMBDA")
+        self.remove_comments()
         self.assert_job_data()
         self.elements = []
         self.get_elements()
@@ -59,7 +63,7 @@ class SpecsReader(TemplateSheetReader):
                 key = key.replace('á', 'a').replace('é', 'e').replace('í', 'i').replace('ó', 'o').replace('ú', 'u')
                 if key in new_element:
                     raise ValueError(f"Clave duplicada '{key}' para el mismo tipo de muestra.")
-                if self.df.iloc[i, 0].strip().startswith('Identificación usuario'):
+                if key in ('Identificacion_usuario', 'Modelo'):
                     new_element[key] = self.df.iloc[i, 1:].dropna().tolist()
                     for index, value in enumerate(new_element[key]):
                         if isinstance(value, float) and value.is_integer():
@@ -346,7 +350,7 @@ class ParallelismReader(TemplateSheetReader):
         }
 
     def build_table(self, elements):
-        df = pd.DataFrame(columns=["Marca/Modelo", "Identificación", "Desviación de paralelismo / µm"])
+        df = pd.DataFrame(columns=["Marca/Modelo (conjunto)", "Modelo", "Identificación", "Desviación de paralelismo / µm"])
         for element in elements:
             if "Paralelismo" not in element or element["Paralelismo"] != "Si":
                 continue
@@ -357,13 +361,15 @@ class ParallelismReader(TemplateSheetReader):
                 new_rows = []
                 for k_sub_element in range(len(sub_elements_ids)):
                     if self.elements[k_sub_element] is not None:
-                        paralelismo = self.get_ufloat(self.get_index_by_id(sub_elements_ids[k_sub_element]))
+                        index_in_parallelism_data = self.get_index_by_id(sub_elements_ids[k_sub_element])
+                        paralelismo = self.get_ufloat(index_in_parallelism_data)
                         marca = (
                             f'{"_" * (n_subelements - 1)}{element["Marca"]} {element["Code"]}'
                             if k_sub_element == 0 else ''
                         )
                         new_rows.append({
-                            "Marca/Modelo": marca,
+                            "Marca/Modelo (conjunto)": marca,
+                            "Modelo": element["Modelo"][k_sub_element] if isinstance(element["Modelo"], list) else element["Modelo"],
                             "Identificación": f"{sub_elements_ids[k_sub_element]}",
                             "Desviación de paralelismo / µm": "{:.2fp}".format(paralelismo)
                             .replace("+/-", " ± ").replace(".", ",")
