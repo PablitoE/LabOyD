@@ -33,6 +33,10 @@ select = [
     "N",  # pep8-naming    
 ]
 
+ignore = [
+    "N816", # "MixedCaseVariable"
+]
+
 # Exclude files/directories
 exclude = [
     ".jpg",
