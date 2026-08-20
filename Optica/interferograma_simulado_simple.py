@@ -1,8 +1,7 @@
-import numpy as np
 import matplotlib.pyplot as plt
-from scipy.ndimage import gaussian_filter
+import numpy as np
 from mpl_toolkits.axes_grid1 import make_axes_locatable
-
+from scipy.ndimage import gaussian_filter
 
 # Full HD (1920x1080)
 # Para HD (1280x720)

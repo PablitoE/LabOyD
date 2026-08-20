@@ -16,12 +16,11 @@ class FlatInterferogramGenerator():
                  maximum_deviation_nm=70.0):
         assert isinstance(shape, tuple) and len(shape) == 2, "shape debe ser una tupla de dos elementos"
         assert isinstance(pixel_size, (int, float)) and pixel_size > 0, "pixel_size debe ser un número positivo"
-        assert isinstance(save_path, str) and save_path != "", "save_path debe ser una cadena no vacía"
         assert isinstance(wavelength_nm, (int, float)) and wavelength_nm > 0, \
                "wavelength_nm debe ser un número positivo"
         assert isinstance(min_fringe, (int, float)) and min_fringe > 0, "min_fringe debe ser un número no negativo"
-        assert isinstance(max_fringe, (int, float)) and max_fringe > min_fringe, \
-               "max_fringe debe ser un número positivo mayor que min_fringe"
+        assert isinstance(max_fringe, (int, float)) and max_fringe >= min_fringe, \
+               "max_fringe debe ser un número positivo mayor o igual que min_fringe"
         assert isinstance(diameter, (int, float)) and diameter > 0, "diameter debe ser un número positivo"
         assert isinstance(max_rotation, (int, float)) and 0 <= max_rotation <= 90, \
                "max_rotation debe estar en el rango [0, 90 grados]"
@@ -43,7 +42,6 @@ class FlatInterferogramGenerator():
         self.visibility_ratio = visibility_ratio
         self.noise_level = noise_level
         self.maximum_deviation_nm = maximum_deviation_nm
-        os.makedirs(self.save_path, exist_ok=True)
 
         x, y = np.meshgrid(np.arange(self.shape[1]), np.arange(self.shape[0]))
         self.X = x - self.shape[1] // 2
@@ -78,6 +76,7 @@ class FlatInterferogramGenerator():
 
     def random_rotation(self, interferogram):
         if self.max_rotation == 0.0:
+            self.current_rotation_angle = 0
             return interferogram
 
         self.current_rotation_angle = np.random.uniform(-self.max_rotation, self.max_rotation)
@@ -109,6 +108,8 @@ class FlatInterferogramGenerator():
 
         surface *= self.aperture_mask
         surface = surface / (np.max(np.abs(surface)) - np.min(np.abs(surface)))
+        if self.current_maximum_deviation_nm is None:
+            self.current_maximum_deviation_nm = self.maximum_deviation_nm
         self.surface = surface * self.current_maximum_deviation_nm / self.wavelength_nm * 2
 
         if plot_surface:
@@ -118,6 +119,8 @@ class FlatInterferogramGenerator():
             plt.xlabel('Píxeles')
             plt.ylabel('Píxeles')
             plt.show()
+
+        return self.surface
 
     def get_maximum_simulated_deviation_px(self, plot=False):
         phase = self.current_phase.copy()
@@ -149,7 +152,7 @@ class FlatInterferogramGenerator():
         kx = normalized_carrier_frequency
         ky = 0.0
 
-        self.current_phase = 2 * np.pi * (kx * self.X + ky * self.Y + self.surface)
+        self.current_phase = 2 * np.pi * (kx * self.X + ky * self.Y + self.surface + np.random.rand())
         self.get_maximum_simulated_deviation_px(plot=False)
         interferogram = 1 + self.visibility_ratio * np.cos(self.current_phase)
         interferogram *= self.aperture_mask
@@ -162,6 +165,13 @@ class FlatInterferogramGenerator():
         self.rotate_simulated_minima_curves()
 
         return interferogram_uint8
+
+    def validate_save_path(self):
+        if self.save_path is None or self.save_path == "":
+            raise ValueError("save_path no puede ser None o vacío."
+                              " Por favor, especifique un directorio de guardado válido.")
+        if not os.path.exists(self.save_path):
+            os.makedirs(self.save_path, exist_ok=True)
 
     def generate(self, num_samples=1, output_mode="files", simulation_mode="random", surface_options=None):
         assert isinstance(num_samples, int) and num_samples > 0, "num_samples debe ser un entero positivo"
@@ -183,6 +193,7 @@ class FlatInterferogramGenerator():
             self.current_frequency = self.carrier_frequencies[i]
             interferogram = self.generate_flat_interferogram(self.current_frequency)
             if output_mode == "files":
+                self.validate_save_path()
                 filename = f"flat_interferogram_{i+1:03d}.png"
                 filepath = os.path.join(self.save_path, filename)
                 Image.fromarray(interferogram).save(filepath)

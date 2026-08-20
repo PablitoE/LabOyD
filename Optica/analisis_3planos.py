@@ -12,7 +12,7 @@ from scipy.ndimage import gaussian_filter
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-def generate_surface(n_rows, n_cols, max_dev_pair, max_dev_impair):
+def generate_surface(n_rows, n_cols, max_dev_even, max_dev_odd):
     x = np.linspace(-1.1, 1.1, n_cols)
     y = np.linspace(-1.1, 1.1, n_rows)
     xx, yy = np.meshgrid(x, y)
@@ -22,24 +22,24 @@ def generate_surface(n_rows, n_cols, max_dev_pair, max_dev_impair):
     Tomar la parte par de la superficie como la que reflejada en x da igual, y la parte impar de la superficie como la
     que reflejada en y da 0.
     """
-    surface_pair = (surface + surface[:, ::-1]) / 2
-    surface_impair = surface - surface_pair
-    surface_pair = surface_pair / (np.max(surface_pair) - np.min(surface_pair))
-    surface_impair = surface_impair / (np.max(surface_impair) - np.min(surface_impair))
-    surface_pair *= max_dev_pair
-    surface_impair *= max_dev_impair
-    return surface_pair + surface_impair
+    surface_even = (surface + surface[:, ::-1]) / 2
+    surface_odd = surface - surface_even
+    surface_even = surface_even / (np.max(surface_even) - np.min(surface_even))
+    surface_odd = surface_odd / (np.max(surface_odd) - np.min(surface_odd))
+    surface_even *= max_dev_even
+    surface_odd *= max_dev_odd
+    return surface_even + surface_odd
 
 if __name__ == "__main__":
     verbose = False
     n_rows = 256
     n_cols = 256
-    max_dev_pair_k = 54
-    max_dev_impair_k = 0
-    max_dev_pair_l = 68
-    max_dev_impair_l = 0
-    max_dev_pair_m = 57
-    max_dev_impair_m = 0
+    max_dev_even_k = 54
+    max_dev_odd_k = 0
+    max_dev_even_l = 68
+    max_dev_odd_l = 0
+    max_dev_even_m = 57
+    max_dev_odd_m = 0
     uncert_k2 = 0
 
     n_tests = 1000
@@ -48,9 +48,9 @@ if __name__ == "__main__":
     error_k = np.zeros(n_tests)
 
     for kt in tqdm.tqdm(range(n_tests)):
-        surface_k = generate_surface(n_rows, n_cols, max_dev_pair_k, max_dev_impair_k)
-        surface_l = generate_surface(n_rows, n_cols, max_dev_pair_l, max_dev_impair_l)
-        surface_m = generate_surface(n_rows, n_cols, max_dev_pair_m, max_dev_impair_m)
+        surface_k = generate_surface(n_rows, n_cols, max_dev_even_k, max_dev_odd_k)
+        surface_l = generate_surface(n_rows, n_cols, max_dev_even_l, max_dev_odd_l)
+        surface_m = generate_surface(n_rows, n_cols, max_dev_even_m, max_dev_odd_m)
 
         max_dev_k = np.ptp(surface_k)
         max_dev_l = np.ptp(surface_l)
