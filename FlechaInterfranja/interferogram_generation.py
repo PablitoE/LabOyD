@@ -13,7 +13,7 @@ from Varios.lines_points import rotate_2d_points
 class FlatInterferogramGenerator():
     def __init__(self, shape=(1024, 1024), pixel_size=65e-6, save_path=None, wavelength_nm=632.8, min_fringe=5,
                  max_fringe=20, diameter=50e-3, max_rotation=0.0, visibility_ratio=1.0, noise_level=0.01,
-                 maximum_deviation_nm=70.0):
+                 maximum_deviation_nm=70.0, seed=None):
         assert isinstance(shape, tuple) and len(shape) == 2, "shape debe ser una tupla de dos elementos"
         assert isinstance(pixel_size, (int, float)) and pixel_size > 0, "pixel_size debe ser un número positivo"
         assert isinstance(wavelength_nm, (int, float)) and wavelength_nm > 0, \
@@ -42,6 +42,10 @@ class FlatInterferogramGenerator():
         self.visibility_ratio = visibility_ratio
         self.noise_level = noise_level
         self.maximum_deviation_nm = maximum_deviation_nm
+        self.seed = seed
+
+        if seed is not None:
+            np.random.seed(seed)
 
         x, y = np.meshgrid(np.arange(self.shape[1]), np.arange(self.shape[0]))
         self.X = x - self.shape[1] // 2
@@ -82,6 +86,11 @@ class FlatInterferogramGenerator():
         self.current_rotation_angle = np.random.uniform(-self.max_rotation, self.max_rotation)
 
         return rotate(interferogram, self.current_rotation_angle, reshape=False, order=3, mode='nearest')
+
+    @property
+    def current_rotated_frequencies(self):
+        return (np.cos(np.deg2rad(self.current_rotation_angle)) * self.current_frequency,
+                np.sin(np.deg2rad(self.current_rotation_angle)) * self.current_frequency)
 
     def simulate_surface(self, no_tilt=True, plot_surface=False, mode="random", choice_ratio_fit_tilt=0.1):
         if mode == "random":
@@ -148,8 +157,10 @@ class FlatInterferogramGenerator():
     def rotate_simulated_minima_curves(self):
         self.minima_curves = rotate_2d_points(self.minima_curves, -self.current_rotation_angle, self.shape)
 
-    def generate_flat_interferogram(self, normalized_carrier_frequency=0.1):
-        kx = normalized_carrier_frequency
+    def generate_flat_interferogram(self, normalized_carrier_frequency=None):
+        if normalized_carrier_frequency is not None:
+            self.current_frequency = normalized_carrier_frequency
+        kx = self.current_frequency
         ky = 0.0
 
         self.current_phase = 2 * np.pi * (kx * self.X + ky * self.Y + self.surface + np.random.rand())
