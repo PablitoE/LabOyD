@@ -9,7 +9,7 @@ from FlechaInterfranja.interferogram_generation import FlatInterferogramGenerato
 
 IMAGE_SHAPE = (256, 256)
 WAVELENGTH = 632.8  # Wavelength in nm
-ROTATION_FOURTH_IMAGE_DEG = 30.0  # Rotation of the fourth image in degrees
+ROTATION_FOURTH_IMAGE_DEG = 60.0  # Rotation of the fourth image in degrees
 
 PITCH = 65e-6  # Pitch in meters
 N_FRINGES = 5  # Number of fringes
@@ -18,7 +18,7 @@ MAX_FRINGES_ROTATION = 30.0  # Maximum rotation in degrees of the fringes
 VISIBILITY_RATIO = 1.0  # Visibility ratio
 MAX_DEVIATION_NM = 100.0  # Maximum deviation in nm
 
-ORDER_PHASE = 6  # Maximum order of Zernike polynomials for phase
+ORDER_PHASE = 3  # Maximum order of Zernike polynomials for phase
 ORDER_VISIBILITY = 0  # Maximum order of Zernike polynomials for visibility
 ORDER_BRIGHTNESS = 0  # Maximum order of Zernike polynomials for brightness
 TOLERANCE_ESTIMATED_TILT_PERCENTAGE = 25
@@ -31,7 +31,7 @@ PLOT_INTERFEROGRAMS = False
 PLOT_MEASURED_SURFACES = False
 PLOT_RESULTING_SURFACES = True
 DEBUG_FRITZ = True
-MAKE_SURFACES_AS_ZERNIKES = False
+MAKE_SURFACES_AS_ZERNIKES = True
 
 
 def estimate_frequency_from_array(arr, prominence=0.1, center=None, diameter=None, debug=False):
@@ -362,6 +362,12 @@ def fritz_algorithm(z_d, z_e, z_f, z_g, rotation_rad):
                 class_fritz = 2
             else:
                 class_fritz = 4
+        if abs(s_n) < 1e-9:
+            # Special cases sin(m*rotation_rad) ~= 0
+            if (class_fritz == 3 and c_n > 0) or class_fritz == 4:
+                class_fritz = 5
+            elif class_fritz == 3 and c_n < 0:
+                class_fritz = 6
 
         if class_fritz == 1:
             z_m[noll_k] = (ze + zf) / 4 + (zg - zd) / 2
@@ -379,12 +385,32 @@ def fritz_algorithm(z_d, z_e, z_f, z_g, rotation_rad):
                 z_m_done[noll_k] = True
                 z_k[noll_k] = z_m[noll_k] - zg
                 z_l[noll_k] = z_m[noll_k] - (ze + zd + zg) / 2
-        else:
+        elif class_fritz == 4:
             if z_m_done[noll_neg_m]:
                 z_m[noll_k] = (-z_f[noll_neg_m] + z_l[noll_neg_m] + z_m[noll_neg_m] * c_n) / s_n
                 z_m_done[noll_k] = True
                 z_k[noll_k] = z_m[noll_k] - zg
                 z_l[noll_k] = z_m[noll_k] - (ze + zd + zg) / 2
+        elif class_fritz == 6:
+            pseudo_inverse = np.array([[3, 0, -3, -3],[-1, -2, -3, -1],[1, 2, -3, 1]]) / 6
+            zs = pseudo_inverse @ np.array([zd, ze, zf, zg])
+            z_k[noll_k] = zs[0]
+            z_l[noll_k] = zs[1]
+            z_m[noll_k] = zs[2]
+            z_m_done[noll_k] = True
+        else:
+            matrix_a = np.array([
+                [ 1, -1,  0],
+                [ 0, -1,  1],
+                [ 0, -1,  1],
+                [-1,  0,  1]
+            ])
+            b = np.array([zd, ze, zf, zg])
+            zs = np.linalg.lstsq(matrix_a, b, rcond=None)[0]
+            z_k[noll_k] = zs[0]
+            z_l[noll_k] = zs[1]
+            z_m[noll_k] = zs[2]
+            z_m_done[noll_k] = True
 
         noll_k = noll_k + 1 if noll_k < max_coeff - 1 else 0
     return z_m, z_k, z_l
@@ -523,6 +549,13 @@ if __name__ == "__main__":
 
     z_C, z_A, z_B = fritz_algorithm(zernike_coeffs_BA, zernike_coeffs_BC, zernike_coeffs_BCrot, zernike_coeffs_AC,
                                     rotation_rad=-rotation_fourth_image_rad)
+
+    # Evaluate the results
+    print(f"Error in Surface A zernike coeffs: {abs(zern_coeffs_A - z_A)}")
+    print(f"Error in Surface B zernike coeffs: {abs(zern_coeffs_B - z_B)}")
+    print(f"Error in Surface C zernike coeffs: {abs(zern_coeffs_C - z_C)}")
+    print(f"{'-'*50}")
+
     shrunk_mask = generator.aperture_mask.copy()
     shrunk_mask = binary_erosion(shrunk_mask, structure=np.ones((3, 3)), iterations=2)
     result_A = zernike_surface(z_A, IMAGE_SHAPE, generator.diameter_pixels)
