@@ -1,15 +1,15 @@
 import matplotlib.pyplot as plt
 import numpy as np
 from scipy.ndimage import binary_erosion, rotate
-from scipy.optimize import least_squares
-from scipy.signal import find_peaks
+from scipy.optimize import OptimizeResult, least_squares
+from scipy.signal import find_peaks, savgol_filter
 from zernike import RZern
 
 from FlechaInterfranja.interferogram_generation import FlatInterferogramGenerator
 
 IMAGE_SHAPE = (256, 256)
 WAVELENGTH = 632.8  # Wavelength in nm
-ROTATION_FOURTH_IMAGE_DEG = 60.0  # Rotation of the fourth image in degrees
+ROTATION_FOURTH_IMAGE_DEG = 45.0  # Rotation of the fourth image in degrees
 
 PITCH = 65e-6  # Pitch in meters
 N_FRINGES = 5  # Number of fringes
@@ -18,7 +18,7 @@ MAX_FRINGES_ROTATION = 30.0  # Maximum rotation in degrees of the fringes
 VISIBILITY_RATIO = 1.0  # Visibility ratio
 MAX_DEVIATION_NM = 100.0  # Maximum deviation in nm
 
-ORDER_PHASE = 3  # Maximum order of Zernike polynomials for phase
+ORDER_PHASE = 6  # Maximum order of Zernike polynomials for phase
 ORDER_VISIBILITY = 0  # Maximum order of Zernike polynomials for visibility
 ORDER_BRIGHTNESS = 0  # Maximum order of Zernike polynomials for brightness
 TOLERANCE_ESTIMATED_TILT_PERCENTAGE = 25
@@ -28,20 +28,24 @@ MIN_TOLERANCE_TILT_RAD = 0.5
 RANDOM_SEED = 0
 
 PLOT_INTERFEROGRAMS = False
+PLOT_HISTORY_LEAST_SQUARES = False
 PLOT_MEASURED_SURFACES = False
 PLOT_RESULTING_SURFACES = True
-DEBUG_FRITZ = True
+DEBUG_FREQUENCY_ESTIMATE = False
+SHOW_COEFF_ERRORS = True
+DEBUG_FRITZ_MOCK_FIT = False
 MAKE_SURFACES_AS_ZERNIKES = True
 
 
-def estimate_frequency_from_array(arr, prominence=0.1, center=None, diameter=None, debug=False):
+def estimate_frequency_from_array(arr, prominence=0.1, center=None, diameter=None, debug=False, distance=5):
     """
     Use find_peaks to estimate the frequency of a 1D array. Use the prominence of the peaks to filter out noise.
     Get the threshold of the prominence as a fraction of the peak to peak amplitude.
     The frequency is estimated as the inverse of the average distance between peaks.
     """
-    peaks_max, _ = find_peaks(arr, prominence=prominence, width=2, distance=5)
-    peaks_min, _ = find_peaks(-arr, prominence=prominence, width=2, distance=5)
+    arr = savgol_filter(arr, window_length=distance*2, polyorder=3)
+    peaks_max, _ = find_peaks(arr, prominence=prominence, width=2, distance=distance)
+    peaks_min, _ = find_peaks(-arr, prominence=prominence, width=2, distance=distance)
     if diameter is not None:
         center = arr.size // 2 if center is None else center
         peaks_max = peaks_max[np.abs(peaks_max - center) < diameter / 2 * 0.95]
@@ -151,9 +155,9 @@ def zernike_fit_interferogram(interferogram, max_order_phase, max_order_visibili
     # Get a first estimate of the fringe frequency from the interferogram
     peak_prominence = 0.1 * np.ptp(interferogram)
     frequency_estimate_x = estimate_frequency_from_array(interferogram[interferogram.shape[0] // 2, :], peak_prominence,
-                                                         diameter=diameter, debug=False)
+                                                         diameter=diameter, debug=DEBUG_FREQUENCY_ESTIMATE)
     frequency_estimate_y = estimate_frequency_from_array(interferogram[:, interferogram.shape[1] // 2], peak_prominence,
-                                                         diameter=diameter, debug=False)
+                                                         diameter=diameter, debug=DEBUG_FREQUENCY_ESTIMATE)
     print(f"Frequency estimate: {frequency_estimate_x:.3f}, {frequency_estimate_y:.3f}")
     n_fringes_x = frequency_estimate_x * diameter
     n_fringes_y = frequency_estimate_y * diameter
@@ -168,14 +172,15 @@ def zernike_fit_interferogram(interferogram, max_order_phase, max_order_visibili
     z_tilt.make_cart_grid(mat_x, mat_y)
     zernike_coeffs_tilt = np.zeros(z_tilt.nk)
     zernike_coeffs_tilt[1:] = 2 * np.pi * coeffs_tilt_estimate  # Initialize tilt coefficients
-    z_visibility = RZern(max_order_visibility)
-    z_visibility.make_cart_grid(mat_x, mat_y)
-    zernike_coeffs_visibility = np.zeros(z_visibility.nk)
-    zernike_coeffs_visibility[0] = np.ptp(interferogram) / 2  # Initialize visibility coefficient
     z_brightness = RZern(max_order_brightness)
     z_brightness.make_cart_grid(mat_x, mat_y)
     zernike_coeffs_brightness = np.zeros(z_brightness.nk)
     zernike_coeffs_brightness[0] = np.mean(interferogram)  # Initialize brightness coefficient
+    z_visibility = RZern(max_order_visibility)
+    z_visibility.make_cart_grid(mat_x, mat_y)
+    zernike_coeffs_visibility = np.zeros(z_visibility.nk)
+    # Initialize visibility coefficient
+    zernike_coeffs_visibility[0] = np.ptp(interferogram) / 2 / zernike_coeffs_brightness[0]
 
     coeffs0 = np.r_[zernike_coeffs_tilt, zernike_coeffs_visibility, zernike_coeffs_brightness]
     bounds = (-np.inf * np.ones_like(coeffs0), np.inf * np.ones_like(coeffs0))
@@ -189,15 +194,16 @@ def zernike_fit_interferogram(interferogram, max_order_phase, max_order_visibili
     bounds[1][2] = coeffs0[2] + tolerance_tilt_y
 
     initial_residual = get_residuals(coeffs0, z_tilt, z_visibility, z_brightness, interferogram, False)
-    print(f"Initial MSE with rough estimate of tilt: {np.mean(initial_residual**2)}")
+    print(f"Initial RMSE with rough estimate of tilt: {np.sqrt(np.mean(initial_residual**2))}")
 
     least_squares_result = least_squares(get_residuals, coeffs0,
                                          args=(z_tilt, z_visibility, z_brightness, interferogram, False), bounds=bounds)
-    print(f"Tilt estimated. MSE: {np.mean(least_squares_result.fun**2)}")
+    print(f"Tilt estimated. RMSE: {np.sqrt(np.mean(least_squares_result.fun**2))}")
     print(f"Estimated frequencies: {np.array(least_squares_result.x[1:z_tilt.nk]) * 2 / np.pi / diameter}")
 
-    fitted_interferogram = eval_interferogram_model(least_squares_result.x, z_tilt, z_visibility, z_brightness)
     if plot:
+        fitted_interferogram = eval_interferogram_model(least_squares_result.x, z_tilt, z_visibility, z_brightness)
+
         fig, axs = plt.subplots(1, 4, figsize=(15, 5))
         axs[0].imshow(interferogram, cmap="gray", vmin=0, vmax=255)
         axs[0].set_title('Interferogram')
@@ -206,32 +212,43 @@ def zernike_fit_interferogram(interferogram, max_order_phase, max_order_visibili
         plt.show(block=False)
 
     # Repeat with estimated tilt coefficients
-    zernike_coeffs_tilt = least_squares_result.x[:z_tilt.nk]
+    zernike_coeffs_previous = least_squares_result.x[:z_tilt.nk]
     zernike_coeffs_visibility = least_squares_result.x[z_tilt.nk:z_tilt.nk + z_visibility.nk]
     zernike_coeffs_brightness = least_squares_result.x[z_tilt.nk + z_visibility.nk:]
+    previous_nk = z_tilt.nk
 
-    z_surface = RZern(max_order_phase)
-    z_surface.make_cart_grid(mat_x, mat_y)
-    zernike_coeffs_surface = np.zeros(z_surface.nk)
-    zernike_coeffs_surface[:z_tilt.nk] = zernike_coeffs_tilt
-    coeffs0 = np.r_[zernike_coeffs_surface, zernike_coeffs_visibility, zernike_coeffs_brightness]
+    for progressive_order in range(2, max_order_phase + 1):
+        z_surface = RZern(progressive_order)
+        z_surface.make_cart_grid(mat_x, mat_y)
+        zernike_coeffs_surface = np.zeros(z_surface.nk)
+        zernike_coeffs_surface[:previous_nk] = zernike_coeffs_previous.copy()
+        coeffs0 = np.r_[zernike_coeffs_surface, zernike_coeffs_visibility, zernike_coeffs_brightness]
 
-    bounds = (-np.inf * np.ones_like(coeffs0), np.inf * np.ones_like(coeffs0))
-    # Do not allow the tilt coefficients to get too different from the initial estimate
-    bounds[0][1] = coeffs0[1] - abs(coeffs0[1]) * TOLERANCE_TILT_PERCENTAGE / 100
-    bounds[1][1] = coeffs0[1] + abs(coeffs0[1]) * TOLERANCE_TILT_PERCENTAGE / 100
-    bounds[0][2] = coeffs0[2] - abs(coeffs0[2]) * TOLERANCE_TILT_PERCENTAGE / 100
-    bounds[1][2] = coeffs0[2] + abs(coeffs0[2]) * TOLERANCE_TILT_PERCENTAGE / 100
+        bounds = (-np.inf * np.ones_like(coeffs0), np.inf * np.ones_like(coeffs0))
+        # Do not allow the tilt coefficients to get too different from the initial estimate
+        bounds[0][1] = coeffs0[1] - abs(coeffs0[1]) * TOLERANCE_TILT_PERCENTAGE / 100
+        bounds[1][1] = coeffs0[1] + abs(coeffs0[1]) * TOLERANCE_TILT_PERCENTAGE / 100
+        bounds[0][2] = coeffs0[2] - abs(coeffs0[2]) * TOLERANCE_TILT_PERCENTAGE / 100
+        bounds[1][2] = coeffs0[2] + abs(coeffs0[2]) * TOLERANCE_TILT_PERCENTAGE / 100
 
-    least_squares_result = least_squares(get_residuals, coeffs0,
-                                         args=(z_surface, z_visibility, z_brightness, interferogram, False),
-                                         bounds=bounds)
+        history_costs = []
+        def callback_ls(intermediate_result: OptimizeResult):
+            history_costs.append(intermediate_result.cost)
 
-    print(f"Final MSE: {np.mean(least_squares_result.fun**2)}")
+        least_squares_result = least_squares(get_residuals, coeffs0,
+                                            args=(z_surface, z_visibility, z_brightness, interferogram, False),
+                                            bounds=bounds, callback=callback_ls, ftol=1e-12, xtol=1e-12)
+        if PLOT_HISTORY_LEAST_SQUARES:
+            plt.plot(history_costs)
+            plt.title('Cost history of the least squares fit')
+            plt.show()
+        print(f"Final RMSE: {np.sqrt(np.mean(least_squares_result.fun**2))}")
 
+        zernike_coeffs_previous = least_squares_result.x[:z_surface.nk].copy()
+        zernike_coeffs_visibility = least_squares_result.x[z_surface.nk:z_surface.nk + z_visibility.nk].copy()
+        zernike_coeffs_brightness = least_squares_result.x[z_surface.nk + z_visibility.nk:].copy()
+        previous_nk = z_surface.nk
     zernike_coeffs_surface = least_squares_result.x[:z_surface.nk].copy()
-    zernike_coeffs_visibility = least_squares_result.x[z_surface.nk:z_surface.nk + z_visibility.nk]
-    zernike_coeffs_brightness = least_squares_result.x[z_surface.nk + z_visibility.nk:]
 
     zernike_coeffs_surface[:3] = 0.0  # Set piston and tilt coefficients to zero
     fitted_surface = z_surface.eval_grid(zernike_coeffs_surface, matrix=True)
@@ -262,6 +279,7 @@ def zernike_surface(zernike_coeffs, shape, diameter):
     z_surface = zern_from_nk(len(zernike_coeffs))
     z_surface.make_cart_grid(mat_x, mat_y)
     fitted_surface = z_surface.eval_grid(zernike_coeffs, matrix=True)
+    fitted_surface[np.isnan(fitted_surface)] = 0
     return fitted_surface
 
 
@@ -278,7 +296,7 @@ def zernike_fit_lsq(order, surface, diameter):
 
 
 def fit_interferogram_with_zernikes(interferogram, max_order_phase: int=4, max_order_visibility: int=4,
-                                    max_order_brightness: int=4, diameter_px: float=None):
+                                    max_order_brightness: int=4, diameter_px: float=None, plot=False):
     """
     Fit the interferogram with Zernike polynomials up to a specified order.
 
@@ -302,12 +320,15 @@ def fit_interferogram_with_zernikes(interferogram, max_order_phase: int=4, max_o
 
     # Fit Zernike polynomials
     zernike_coeffs_surface, _, _, fitted_surface = zernike_fit_interferogram(
-        interferogram, max_order_phase, max_order_visibility, max_order_brightness, diameter=diameter_px
+        interferogram, max_order_phase, max_order_visibility, max_order_brightness, diameter=diameter_px,
+        plot=plot
     )
 
     # Reconstruct surface from Zernike coefficients
     # fitted_surface = zernike_surface(zernike_coeffs_surface, IMAGE_SHAPE, diameter=diameter_px)
     fitted_surface = fitted_surface / (2 * np.pi)
+    fitted_surface[np.isnan(fitted_surface)] = 0
+    zernike_coeffs_surface = zernike_coeffs_surface / (2 * np.pi)
 
     return zernike_coeffs_surface, fitted_surface
 
@@ -315,8 +336,14 @@ def fit_interferogram_with_zernikes(interferogram, max_order_phase: int=4, max_o
 def filter_as_zernike(surface, order, diameter_px):
     zern_coeffs = zernike_fit_lsq(order, surface, diameter_px)
     surface = zernike_surface(zern_coeffs, surface.shape, diameter_px)
-    surface[np.isnan(surface)] = 0
     return surface, zern_coeffs
+
+
+def remove_piston_and_tilt_with_zernikes(surface, diameter_px):
+    zern_coeffs = zernike_fit_lsq(1, surface, diameter_px)
+    surface = surface - zernike_surface(zern_coeffs, surface.shape, diameter_px)
+    surface[np.isnan(surface)] = 0
+    return surface
 
 
 def fritz_algorithm(z_d, z_e, z_f, z_g, rotation_rad):
@@ -438,6 +465,29 @@ def rotate_zernike_coeffs(zernike_coeffs, angle_rad):
     return rotated_zernike_coeffs
 
 
+def plot_compare_ims(list_of_ims_1, names_1, list_of_ims_2, names_2):
+    n_ims = len(list_of_ims_1)
+    assert n_ims == len(list_of_ims_2)
+    assert n_ims == len(names_1)
+    assert n_ims == len(names_2)
+
+    fig, axs = plt.subplots(3, n_ims, figsize=(10, 10))
+    for i in range(n_ims):
+        im1 = list_of_ims_1[i]
+        im1[np.isnan(im1)] = 0
+        im2 = list_of_ims_2[i]
+        im2[np.isnan(im2)] = 0
+        name1 = names_1[i]
+        name2 = names_2[i]
+        vrange = max(abs(np.min(im1)), abs(np.max(im2)), abs(np.min(im2)), abs(np.max(im1)))
+        axs[0, i].imshow(im1, cmap='gray', vmin=-vrange, vmax=vrange)
+        axs[0, i].set_title(name1)
+        axs[1, i].imshow(im2, cmap='gray', vmin=-vrange, vmax=vrange)
+        axs[1, i].set_title(name2)
+        axs[2, i].imshow(im1 - im2, cmap='gray', vmin=-vrange, vmax=vrange)
+        axs[2, i].set_title('Error (1-2)')
+    plt.show()
+
 if __name__ == "__main__":
     generator = FlatInterferogramGenerator(shape=IMAGE_SHAPE, wavelength_nm=WAVELENGTH, pixel_size=PITCH,
                                            min_fringe=N_FRINGES, max_fringe=N_FRINGES, diameter=DIAMETER,
@@ -450,10 +500,15 @@ if __name__ == "__main__":
     max_deviationC = np.random.rand() * MAX_DEVIATION_NM
     generator.current_maximum_deviation_nm = max_deviationA
     surfaceA = generator.simulate_surface()      # Surface A (k in Fritz algorithm)
+    surfaceA = remove_piston_and_tilt_with_zernikes(surfaceA, generator.diameter_pixels)
     generator.current_maximum_deviation_nm = max_deviationB
     surfaceB = generator.simulate_surface()      # Surface B (l in Fritz algorithm)
+    surfaceB = remove_piston_and_tilt_with_zernikes(surfaceB, generator.diameter_pixels)
     generator.current_maximum_deviation_nm = max_deviationC
     surfaceC = generator.simulate_surface()      # Surface C (m in Fritz algorithm)
+    surfaceC = remove_piston_and_tilt_with_zernikes(surfaceC, generator.diameter_pixels)
+    shrunk_mask = generator.aperture_mask.copy()
+    shrunk_mask = binary_erosion(shrunk_mask, structure=np.ones((3, 3)), iterations=2)
 
     surfaceA_filtered, zern_coeffs_A = filter_as_zernike(surfaceA, ORDER_PHASE, generator.diameter_pixels)
     surfaceB_filtered, zern_coeffs_B = filter_as_zernike(surfaceB, ORDER_PHASE, generator.diameter_pixels)
@@ -497,20 +552,20 @@ if __name__ == "__main__":
         plt.show()
 
     rotation_fourth_image_rad = np.deg2rad(ROTATION_FOURTH_IMAGE_DEG)
-    if DEBUG_FRITZ:
+    mirrored_zern_coeffs_B = mirror_x_zernike_coeffs(zern_coeffs_B)
+    expected_zern_BA = zern_coeffs_A + mirrored_zern_coeffs_B
+    expected_zern_BC = zern_coeffs_C + mirrored_zern_coeffs_B
+    expected_zern_AC = zern_coeffs_C + mirror_x_zernike_coeffs(zern_coeffs_A)
+    rotated_zern_coeffs_C = rotate_zernike_coeffs(zern_coeffs_C, rotation_fourth_image_rad)
+    expected_zern_BCrot = rotated_zern_coeffs_C + mirrored_zern_coeffs_B
+
+    if DEBUG_FRITZ_MOCK_FIT:
         zernike_coeffs_BA = zernike_fit_lsq(ORDER_PHASE, surface_BA, generator.diameter_pixels)
         zernike_coeffs_BC = zernike_fit_lsq(ORDER_PHASE, surface_BC, generator.diameter_pixels)
         zernike_coeffs_AC = zernike_fit_lsq(ORDER_PHASE, surface_AC, generator.diameter_pixels)
         zernike_coeffs_BCrot = zernike_fit_lsq(ORDER_PHASE, surface_BCrot, generator.diameter_pixels)
-
-        mirrored_zern_coeffs_B = mirror_x_zernike_coeffs(zern_coeffs_B)
-        expected_zern_BA = zern_coeffs_A + mirrored_zern_coeffs_B
-        expected_zern_BC = zern_coeffs_C + mirrored_zern_coeffs_B
-        expected_zern_AC = zern_coeffs_C + mirror_x_zernike_coeffs(zern_coeffs_A)
-        rotated_zern_coeffs_C = rotate_zernike_coeffs(zern_coeffs_C, rotation_fourth_image_rad)
-        expected_zern_BCrot = rotated_zern_coeffs_C + mirrored_zern_coeffs_B
     else:
-        print(f"{'-'*50}\nFrequencies A-B: {frequencies_BA}")
+        print(f"Frequencies A-B: {frequencies_BA}")
         zernike_coeffs_BA, fitted_surface_BA = fit_interferogram_with_zernikes(
             interferogram_BA, ORDER_PHASE, ORDER_VISIBILITY, ORDER_BRIGHTNESS, diameter_px=generator.diameter_pixels
         )
@@ -526,38 +581,38 @@ if __name__ == "__main__":
         zernike_coeffs_BCrot, fitted_surface_BCrot = fit_interferogram_with_zernikes(
             interferogram_BCrot, ORDER_PHASE, ORDER_VISIBILITY, ORDER_BRIGHTNESS, diameter_px=generator.diameter_pixels
         )
+        print(f"{'-'*50}")
 
         if PLOT_MEASURED_SURFACES:
-            fig, axs = plt.subplots(2, 4, figsize=(10, 10))
-            axs[0, 0].imshow(fitted_surface_BA, cmap='gray')
-            axs[0, 0].set_title('Fitted surface A-B')
-            axs[0, 1].imshow(fitted_surface_BC, cmap='gray')
-            axs[0, 1].set_title('Fitted surface B-C')
-            axs[0, 2].imshow(fitted_surface_AC, cmap='gray')
-            axs[0, 2].set_title('Fitted surface A-C')
-            axs[0, 3].imshow(fitted_surface_BCrot, cmap='gray')
-            axs[0, 3].set_title('Fitted surface B-C rotated')
-            axs[1, 0].imshow(surface_BA, cmap='gray')
-            axs[1, 0].set_title('Surface A-B')
-            axs[1, 1].imshow(surface_BC, cmap='gray')
-            axs[1, 1].set_title('Surface B-C')
-            axs[1, 2].imshow(surface_AC, cmap='gray')
-            axs[1, 2].set_title('Surface A-C')
-            axs[1, 3].imshow(surface_BCrot, cmap='gray')
-            axs[1, 3].set_title('Surface B-C rotated')
-            plt.show()
+            plot_compare_ims([fitted_surface_BA, fitted_surface_BC, fitted_surface_AC, fitted_surface_BCrot],
+                             ['Fitted surface A-B', 'Fitted surface B-C', 'Fitted surface A-C', 'Fitted surface B-C rotated'],
+                             [surface_BA, surface_BC, surface_AC, surface_BCrot],
+                             ['Surface A-B', 'Surface B-C', 'Surface A-C', 'Surface B-C rotated'])
+
+        rmse_surfaces = [np.sqrt(np.mean((surface_BA[shrunk_mask] - fitted_surface_BA[shrunk_mask])**2)),
+                        np.sqrt(np.mean((surface_BC[shrunk_mask] - fitted_surface_BC[shrunk_mask])**2)),
+                        np.sqrt(np.mean((surface_AC[shrunk_mask] - fitted_surface_AC[shrunk_mask])**2)),
+                        np.sqrt(np.mean((surface_BCrot[shrunk_mask] - fitted_surface_BCrot[shrunk_mask])**2))]
+        print(f"RMSE surfaces: {np.mean(rmse_surfaces):.2e} half_lambdas")
+
+        if SHOW_COEFF_ERRORS:
+            print("Errors in zernike coeffs of the combinations:")
+            print(f"Error in Surface A-B zernike coeffs: {abs(zernike_coeffs_BA - expected_zern_BA)}")
+            print(f"Error in Surface B-C zernike coeffs: {abs(zernike_coeffs_BC - expected_zern_BC)}")
+            print(f"Error in Surface A-C zernike coeffs: {abs(zernike_coeffs_AC - expected_zern_AC)}")
+            print(f"Error in Surface B-C rotated zernike coeffs: {abs(zernike_coeffs_BCrot - expected_zern_BCrot)}")
+            print(f"{'-'*50}")
 
     z_C, z_A, z_B = fritz_algorithm(zernike_coeffs_BA, zernike_coeffs_BC, zernike_coeffs_BCrot, zernike_coeffs_AC,
                                     rotation_rad=-rotation_fourth_image_rad)
 
     # Evaluate the results
-    print(f"Error in Surface A zernike coeffs: {abs(zern_coeffs_A - z_A)}")
-    print(f"Error in Surface B zernike coeffs: {abs(zern_coeffs_B - z_B)}")
-    print(f"Error in Surface C zernike coeffs: {abs(zern_coeffs_C - z_C)}")
-    print(f"{'-'*50}")
+    if SHOW_COEFF_ERRORS:
+        print(f"Error in Surface A zernike coeffs: {abs(zern_coeffs_A - z_A)}")
+        print(f"Error in Surface B zernike coeffs: {abs(zern_coeffs_B - z_B)}")
+        print(f"Error in Surface C zernike coeffs: {abs(zern_coeffs_C - z_C)}")
+        print(f"{'-'*50}")
 
-    shrunk_mask = generator.aperture_mask.copy()
-    shrunk_mask = binary_erosion(shrunk_mask, structure=np.ones((3, 3)), iterations=2)
     result_A = zernike_surface(z_A, IMAGE_SHAPE, generator.diameter_pixels)
     error_A_nm = (result_A - surfaceA) * WAVELENGTH / 2
     print(f"RMSE A: {np.sqrt(np.mean(error_A_nm[shrunk_mask]**2)):.2f} nm")
@@ -569,23 +624,12 @@ if __name__ == "__main__":
     print(f"RMSE C: {np.sqrt(np.mean(error_C_nm[shrunk_mask]**2)):.2f} nm")
 
     if PLOT_RESULTING_SURFACES:
-        fig, axs = plt.subplots(3, 3, figsize=(15, 5))
-        axs[0, 0].imshow(result_A, cmap='gray')
-        axs[0, 0].set_title(r'Resulting surface A / $\lambda / 2$')
-        axs[0, 1].imshow(result_B, cmap='gray')
-        axs[0, 1].set_title(r'Resulting surface B / $\lambda / 2$')
-        axs[0, 2].imshow(result_C, cmap='gray')
-        axs[0, 2].set_title(r'Resulting surface C / $\lambda / 2$')
-        axs[1, 0].imshow(surfaceA, cmap='gray')
-        axs[1, 0].set_title(r'Surface A / $\lambda / 2$')
-        axs[1, 1].imshow(surfaceB, cmap='gray')
-        axs[1, 1].set_title(r'Surface B / $\lambda / 2$')
-        axs[1, 2].imshow(surfaceC, cmap='gray')
-        axs[1, 2].set_title(r'Surface C / $\lambda / 2$')
-        axs[2, 0].imshow(error_A_nm, cmap='gray')
-        axs[2, 0].set_title('Error A / nm')
-        axs[2, 1].imshow(error_B_nm, cmap='gray')
-        axs[2, 1].set_title('Error B / nm')
-        axs[2, 2].imshow(error_C_nm, cmap='gray')
-        axs[2, 2].set_title('Error C / nm')
-        plt.show()
+        plot_compare_ims([result_A, result_B, result_C],
+                         ['Resulting surface A', 'Resulting surface B', 'Resulting surface C'],
+                         [surfaceA, surfaceB, surfaceC],
+                         ['Surface A', 'Surface B', 'Surface C'])
+
+
+    """ Hay que mejorar la estimación de coeficientes de Zernike a partir del interferograma porque el algoritmo de
+    Fritz anda bien cuando se mockea la estimación.
+    """
