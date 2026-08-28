@@ -326,3 +326,25 @@ def remove_piston_and_tilt_with_zernikes(surface, diameter_px):
     surface = surface - zernike_surface(zern_coeffs, surface.shape, diameter_px)
     surface[np.isnan(surface)] = 0
     return surface
+
+
+def mirror_x_zernike_coeffs(zernike_coeffs):
+    zern = zern_from_nk(len(zernike_coeffs))
+    mirrored_zernike_coeffs = np.copy(zernike_coeffs)
+    for i in range(len(zernike_coeffs)):
+        n, m = zern.noll2nm(i + 1)
+        if (n % 2 == 1 and m > 0) or (n % 2 == 0 and m < 0):
+            mirrored_zernike_coeffs[i] = -mirrored_zernike_coeffs[i]
+    return mirrored_zernike_coeffs
+
+
+def rotate_zernike_coeffs(zernike_coeffs, angle_rad):
+    zern = zern_from_nk(len(zernike_coeffs))
+    rotated_zernike_coeffs = np.copy(zernike_coeffs)
+    for i in range(len(zernike_coeffs)):
+        n, m = zern.noll2nm(i + 1)
+        neg_m_index = zern.nm2noll(n, -m) - 1
+        if m != 0:
+            rotated_zernike_coeffs[i] = zernike_coeffs[i] * np.cos(m * angle_rad) + (
+                zernike_coeffs[neg_m_index] * np.sin(m * angle_rad))
+    return rotated_zernike_coeffs

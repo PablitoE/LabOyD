@@ -128,28 +128,6 @@ def fritz_algorithm(z_d, z_e, z_f, z_g, rotation_rad):
     return z_m, z_k, z_l
 
 
-def mirror_x_zernike_coeffs(zernike_coeffs):
-    zern = zfit.zern_from_nk(len(zernike_coeffs))
-    mirrored_zernike_coeffs = np.copy(zernike_coeffs)
-    for i in range(len(zernike_coeffs)):
-        n, m = zern.noll2nm(i + 1)
-        if (n % 2 == 1 and m > 0) or (n % 2 == 0 and m < 0):
-            mirrored_zernike_coeffs[i] = -mirrored_zernike_coeffs[i]
-    return mirrored_zernike_coeffs
-
-
-def rotate_zernike_coeffs(zernike_coeffs, angle_rad):
-    zern = zfit.zern_from_nk(len(zernike_coeffs))
-    rotated_zernike_coeffs = np.copy(zernike_coeffs)
-    for i in range(len(zernike_coeffs)):
-        n, m = zern.noll2nm(i + 1)
-        neg_m_index = zern.nm2noll(n, -m) - 1
-        if m != 0:
-            rotated_zernike_coeffs[i] = zernike_coeffs[i] * np.cos(m * angle_rad) + (
-                zernike_coeffs[neg_m_index] * np.sin(m * angle_rad))
-    return rotated_zernike_coeffs
-
-
 def plot_compare_ims(list_of_ims_1, names_1, list_of_ims_2, names_2):
     n_ims = len(list_of_ims_1)
     assert n_ims == len(list_of_ims_2)
@@ -237,11 +215,11 @@ if __name__ == "__main__":
         plt.show()
 
     rotation_fourth_image_rad = np.deg2rad(ROTATION_FOURTH_IMAGE_DEG)
-    mirrored_zern_coeffs_B = mirror_x_zernike_coeffs(zern_coeffs_B)
+    mirrored_zern_coeffs_B = zfit.mirror_x_zernike_coeffs(zern_coeffs_B)
     expected_zern_BA = zern_coeffs_A + mirrored_zern_coeffs_B
     expected_zern_BC = zern_coeffs_C + mirrored_zern_coeffs_B
-    expected_zern_AC = zern_coeffs_C + mirror_x_zernike_coeffs(zern_coeffs_A)
-    rotated_zern_coeffs_C = rotate_zernike_coeffs(zern_coeffs_C, rotation_fourth_image_rad)
+    expected_zern_AC = zern_coeffs_C + zfit.mirror_x_zernike_coeffs(zern_coeffs_A)
+    rotated_zern_coeffs_C = zfit.rotate_zernike_coeffs(zern_coeffs_C, rotation_fourth_image_rad)
     expected_zern_BCrot = rotated_zern_coeffs_C + mirrored_zern_coeffs_B
 
     if DEBUG_FRITZ_MOCK_FIT:
