@@ -1,8 +1,8 @@
 import matplotlib.pyplot as plt
 import numpy as np
-import zernike_fit as zfit
 from scipy.ndimage import binary_erosion, rotate
 
+import Optica.zernike_fit as zfit
 from FlechaInterfranja.interferogram_generation import FlatInterferogramGenerator
 
 IMAGE_SHAPE = (256, 256)
