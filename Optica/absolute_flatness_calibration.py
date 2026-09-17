@@ -229,19 +229,19 @@ if __name__ == "__main__":
         zernike_coeffs_BCrot = zfit.zernike_fit_lsq(ORDER_PHASE, surface_BCrot, generator.diameter_pixels)
     else:
         print(f"Frequencies A-B: {frequencies_BA}")
-        zernike_coeffs_BA, fitted_surface_BA = zfit.fit_interferogram_with_zernikes(
+        zernike_coeffs_BA, fitted_surface_BA, _ = zfit.fit_interferogram_with_zernikes(
             interferogram_BA, ORDER_PHASE, ORDER_VISIBILITY, ORDER_BRIGHTNESS, diameter_px=generator.diameter_pixels
         )
         print(f"{'-'*50}\nFrequencies B-C: {frequencies_BC}")
-        zernike_coeffs_BC, fitted_surface_BC = zfit.fit_interferogram_with_zernikes(
+        zernike_coeffs_BC, fitted_surface_BC, _ = zfit.fit_interferogram_with_zernikes(
             interferogram_BC, ORDER_PHASE, ORDER_VISIBILITY, ORDER_BRIGHTNESS, diameter_px=generator.diameter_pixels
         )
         print(f"{'-'*50}\nFrequencies A-C: {frequencies_AC}")
-        zernike_coeffs_AC, fitted_surface_AC = zfit.fit_interferogram_with_zernikes(
+        zernike_coeffs_AC, fitted_surface_AC, _ = zfit.fit_interferogram_with_zernikes(
             interferogram_AC, ORDER_PHASE, ORDER_VISIBILITY, ORDER_BRIGHTNESS, diameter_px=generator.diameter_pixels
         )
         print(f"{'-'*50}\nFrequencies B-C rotated: {frequencies_BCrot}")
-        zernike_coeffs_BCrot, fitted_surface_BCrot = zfit.fit_interferogram_with_zernikes(
+        zernike_coeffs_BCrot, fitted_surface_BCrot, _ = zfit.fit_interferogram_with_zernikes(
             interferogram_BCrot, ORDER_PHASE, ORDER_VISIBILITY, ORDER_BRIGHTNESS, diameter_px=generator.diameter_pixels
         )
         print(f"{'-'*50}")

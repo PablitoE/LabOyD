@@ -10,6 +10,9 @@ TOLERANCE_ESTIMATED_TILT_PERCENTAGE = 25
 TOLERANCE_TILT_PERCENTAGE = 10 # Tolerance for tilt coefficients in the least squares fitting (in percentage)
 MIN_TOLERANCE_TILT_RAD = 0.5
 
+MAX_LS_ITERATIONS_PER_COEFF = 5
+PROGRESSIVE_ORDER_INCREASE = False
+
 DEBUG_FREQUENCY_ESTIMATE = False
 PLOT_HISTORY_LEAST_SQUARES = False
 
@@ -90,8 +93,22 @@ def estimate_direction_by_gradients(interferogram, diameter):
     return mean_grad / np.linalg.norm(mean_grad)
 
 
+def eval_interferogram_model_from_coeffs(surface_zernike_coeffs, visibility_zernike_coeffs, brightness_zernike_coeffs,
+                                         shape, diameter):
+    z_surface = zern_from_nk(len(surface_zernike_coeffs))
+    z_visibility = zern_from_nk(len(visibility_zernike_coeffs))
+    z_brightness = zern_from_nk(len(brightness_zernike_coeffs))
+    mat_x, mat_y = mat_xy(shape, diameter)
+    z_surface.make_cart_grid(mat_x, mat_y)
+    z_visibility.make_cart_grid(mat_x, mat_y)
+    z_brightness.make_cart_grid(mat_x, mat_y)
+    return eval_interferogram_model(
+        np.concatenate((surface_zernike_coeffs, visibility_zernike_coeffs, brightness_zernike_coeffs)),
+        z_surface, z_visibility, z_brightness,
+    )
+
 def eval_interferogram_model(zernike_coeffs, zernike_surface: RZern, zernike_visibility: RZern,
-                             zernike_brightness: RZern):
+                             zernike_brightness: RZern, get_jacobian=False):
     zernike_surface_coeffs = zernike_coeffs[:zernike_surface.nk]
     zernike_visibility_coeffs = zernike_coeffs[zernike_surface.nk:zernike_surface.nk + zernike_visibility.nk]
     zernike_brightness_coeffs = zernike_coeffs[zernike_surface.nk + zernike_visibility.nk:]
@@ -99,12 +116,55 @@ def eval_interferogram_model(zernike_coeffs, zernike_surface: RZern, zernike_vis
     fitted_surface = zernike_surface.eval_grid(zernike_surface_coeffs, matrix=True)
     fitted_visibility = zernike_visibility.eval_grid(zernike_visibility_coeffs, matrix=True)
     fitted_brightness = zernike_brightness.eval_grid(zernike_brightness_coeffs, matrix=True)
-    fitted_interferogram = fitted_brightness * (1 + fitted_visibility * np.cos(fitted_surface))
-    return fitted_interferogram
+    if get_jacobian:
+        mask = np.isnan(fitted_surface)
+        fitted_surface = fitted_surface[~mask]
+        fitted_visibility = fitted_visibility[~mask]
+        fitted_brightness = fitted_brightness[~mask]
+        # Get the Zernike polynomials evaluated on the grid for each component
+        max_nk = max(zernike_surface.nk, zernike_visibility.nk, zernike_brightness.nk)
+        zernike_pols = np.zeros((fitted_surface.size, max_nk))
+        for k in range(max_nk):
+            zernike_pols[:, k] = zernike_surface.eval_grid(np.eye(max_nk)[k], matrix=True)[~mask]
+        # Compute the Jacobian matrix
+        jac_surface = (
+            (fitted_brightness * fitted_visibility * np.sin(fitted_surface))[:, np.newaxis]
+            * zernike_pols[:, : zernike_surface.nk]
+        )
+        jac_visibility = -(
+            (fitted_brightness * np.cos(fitted_surface))[:, np.newaxis] * zernike_pols[:, : zernike_visibility.nk]
+        )
+        jac_brightness = -(
+            1 + fitted_visibility * np.cos(fitted_surface)
+        )[:, np.newaxis] * zernike_pols[:, : zernike_brightness.nk]
+        return np.concatenate((jac_surface, jac_visibility, jac_brightness), axis=1)
+    else:
+        fitted_interferogram = fitted_brightness * (1 + fitted_visibility * np.cos(fitted_surface))
+        return fitted_interferogram
+
+
+def zernike_radial_weights(zernike: RZern, p=1):
+    """
+    Compute the regularization weights for the Zernike coefficients based on their order.
+    The weights are proportional to (n+1)^p, where n is the radial order of the Zernike polynomial.
+    """
+    weights = np.zeros(zernike.nk)
+    for k in range(zernike.nk):
+        n, m = zernike.noll2nm(k + 1)
+        weights[k] = (m + 1) ** p
+    return weights
+
+
+def regularization_radial(zernike_surface: RZern, zernike_visibility: RZern, zernike_brightness: RZern, p=1):
+    weights_surface = zernike_radial_weights(zernike_surface, p)
+    weights_visibility = zernike_radial_weights(zernike_visibility, p)
+    weights_brightness = zernike_radial_weights(zernike_brightness, p)
+    weights = np.abs(np.concatenate((weights_surface, weights_visibility, weights_brightness)))
+    return weights / np.sum(weights)
 
 
 def get_residuals(zernike_coeffs, zernike_surface: RZern, zernike_visibility: RZern, zernike_brightness: RZern,
-                  interferogram: np.ndarray, plot=False):
+                  interferogram: np.ndarray, regularization_alpha=0, regularization_weights=None, plot=False):
     fitted_interferogram = eval_interferogram_model(zernike_coeffs,
                                                     zernike_surface, zernike_visibility, zernike_brightness)
     mask = np.isnan(fitted_interferogram)
@@ -119,15 +179,40 @@ def get_residuals(zernike_coeffs, zernike_surface: RZern, zernike_visibility: RZ
 
     # Calculate residuals
     residuals = interferogram[~mask] - fitted_interferogram[~mask]
+
+    # Calculate regularization term
+    if regularization_weights is not None:
+        n_residuals = len(residuals)
+        regularization_term = np.sqrt(
+            np.sum((zernike_coeffs * regularization_weights) ** 2) * regularization_alpha * n_residuals
+        )
+        residuals = np.append(residuals, regularization_term)
     return residuals.flatten()
 
+def get_jacobian(zernike_coeffs, zernike_surface: RZern, zernike_visibility: RZern, zernike_brightness: RZern,
+                 interferogram=None, regularization_alpha=0, regularization_weights=None, plot=False):
+    jacobian = eval_interferogram_model(zernike_coeffs, zernike_surface, zernike_visibility, zernike_brightness,
+                                    get_jacobian=True)
+    if regularization_weights is not None:
+        n_residuals = jacobian.shape[0]
+        regularization_term = np.sqrt(
+            np.sum((zernike_coeffs * regularization_weights) ** 2) * regularization_alpha * n_residuals
+        )
+        regularization_jacobian = (
+            zernike_coeffs * regularization_weights**2 * regularization_alpha * n_residuals / regularization_term
+        )
+        jacobian = np.vstack((jacobian, regularization_jacobian))
+    return jacobian
 
-def callback_ls(intermediate_result: OptimizeResult|np.ndarray, history_costs: list, args=None):
+def callback_ls(intermediate_result: OptimizeResult|np.ndarray, history_costs: list, history_reg: list, args=None):
     if isinstance(intermediate_result, OptimizeResult):
         history_costs.append(intermediate_result.cost)
     elif isinstance(intermediate_result, np.ndarray):
         residuals = get_residuals(intermediate_result, *args)
-        history_costs.append(np.mean(residuals ** 2))
+        if history_reg is not None:
+            history_reg.append(residuals[-1] **2)
+            residuals = residuals[:-1]
+        history_costs.append(np.sum(residuals ** 2))
     else:
         raise ValueError("intermediate_result must be either OptimizeResult or np.ndarray")
 
@@ -139,11 +224,7 @@ def print_if_verbose(verbose, *args):
 
 def zernike_fit_interferogram(interferogram, max_order_phase, max_order_visibility, max_order_brightness, diameter,
                               progressive_order_increase=False, plot=False, verbose=False):
-    max_x = interferogram.shape[1] / diameter
-    arr_x = np.linspace(-max_x, max_x, interferogram.shape[1])
-    max_y = interferogram.shape[0] / diameter
-    arr_y = np.linspace(-max_y, max_y, interferogram.shape[0])
-    mat_x, mat_y = np.meshgrid(arr_x, arr_y)
+    mat_x, mat_y = mat_xy(interferogram.shape, diameter)
 
     # Get a first estimate of the fringe frequency from the interferogram
     peak_prominence = 0.1 * np.ptp(interferogram)
@@ -186,13 +267,15 @@ def zernike_fit_interferogram(interferogram, max_order_phase, max_order_visibili
     bounds[0][2] = coeffs0[2] - tolerance_tilt_y
     bounds[1][2] = coeffs0[2] + tolerance_tilt_y
 
-    initial_residual = get_residuals(coeffs0, z_tilt, z_visibility, z_brightness, interferogram, False)
+    initial_residual = get_residuals(coeffs0, z_tilt, z_visibility, z_brightness, interferogram, plot=False)
     print_if_verbose(verbose, f"Initial RMSE with rough estimate of tilt: {np.sqrt(np.mean(initial_residual**2))}")
 
     least_squares_result = least_squares(get_residuals, coeffs0,
-                                         args=(z_tilt, z_visibility, z_brightness, interferogram, False), bounds=bounds)
+                                         args=(z_tilt, z_visibility, z_brightness, interferogram), bounds=bounds)
     print_if_verbose(verbose, f"Tilt estimated. RMSE: {np.sqrt(np.mean(least_squares_result.fun**2))}")
-    print_if_verbose(verbose, f"Estimated frequencies: {np.array(least_squares_result.x[1:z_tilt.nk]) * 2 / np.pi / diameter}")
+    print_if_verbose(
+        verbose, f'Estimated frequencies: {np.array(least_squares_result.x[1 : z_tilt.nk]) * 2 / np.pi / diameter}'
+    )
 
     if plot:
         fitted_interferogram = eval_interferogram_model(least_squares_result.x, z_tilt, z_visibility, z_brightness)
@@ -217,6 +300,7 @@ def zernike_fit_interferogram(interferogram, max_order_phase, max_order_visibili
         zernike_coeffs_surface = np.zeros(z_surface.nk)
         zernike_coeffs_surface[:previous_nk] = zernike_coeffs_previous.copy()
         coeffs0 = np.r_[zernike_coeffs_surface, zernike_coeffs_visibility, zernike_coeffs_brightness]
+        regularization_weights = regularization_radial(z_surface, z_visibility, z_brightness, p=1)
 
         bounds = (-np.inf * np.ones_like(coeffs0), np.inf * np.ones_like(coeffs0))
         # Do not allow the tilt coefficients to get too different from the initial estimate
@@ -226,24 +310,33 @@ def zernike_fit_interferogram(interferogram, max_order_phase, max_order_visibili
         bounds[1][2] = coeffs0[2] + abs(coeffs0[2]) * TOLERANCE_TILT_PERCENTAGE / 100
 
         history_costs = []
-        args = (z_surface, z_visibility, z_brightness, interferogram, False)
-        callback_in_for = partial(callback_ls, history_costs=history_costs, args=args) if PLOT_HISTORY_LEAST_SQUARES else None
-
-        optimization_result = least_squares(get_residuals, coeffs0,
-                                            args=args,
-                                            bounds=bounds, callback=callback_in_for)
+        history_reg = None if REGULARIZATION_ALPHA == 0 else []
+        args = (z_surface, z_visibility, z_brightness, interferogram, REGULARIZATION_ALPHA, regularization_weights)
         if PLOT_HISTORY_LEAST_SQUARES:
-            plt.plot(history_costs)
+            callback_in_for = partial(callback_ls, history_costs=history_costs, history_reg=history_reg, args=args)
+        else:
+            callback_in_for = None
+
+        max_iterations = MAX_LS_ITERATIONS_PER_COEFF * len(coeffs0)
+        optimization_result = least_squares(get_residuals, coeffs0, args=args, max_nfev=max_iterations,
+                                            bounds=bounds, callback=callback_in_for, jac=get_jacobian)
+        if PLOT_HISTORY_LEAST_SQUARES:
+            plt.plot(history_costs, label='Sum of least squares coeffs')
             plt.title('Cost history of the least squares fit')
+            if history_reg is not None:
+                plt.plot(history_reg, label='Regularization term')
+                plt.legend()
             plt.show()
 
         zernike_coeffs_previous = optimization_result.x[:z_surface.nk].copy()
         zernike_coeffs_visibility = optimization_result.x[z_surface.nk:z_surface.nk + z_visibility.nk].copy()
         zernike_coeffs_brightness = optimization_result.x[z_surface.nk + z_visibility.nk:].copy()
         previous_nk = z_surface.nk
-    print_if_verbose(verbose, f"Final RMSE: {np.sqrt(np.mean(optimization_result.fun**2))}")
+    final_rmse = np.sqrt(np.mean(optimization_result.fun**2))
+    print_if_verbose(verbose, f"Final RMSE: {final_rmse}")
     zernike_coeffs_surface = optimization_result.x[:z_surface.nk].copy()
 
+    low_order_surface_coeffs = zernike_coeffs_surface[:3].copy()
     zernike_coeffs_surface[:3] = 0.0  # Set piston and tilt coefficients to zero
     fitted_surface = z_surface.eval_grid(zernike_coeffs_surface, matrix=True)
     if plot:
@@ -255,7 +348,10 @@ def zernike_fit_interferogram(interferogram, max_order_phase, max_order_visibili
         axs[3].set_title('Fitted Interferogram')
         plt.show()
 
-    return zernike_coeffs_surface, zernike_coeffs_visibility, zernike_coeffs_brightness, fitted_surface
+    return (
+        zernike_coeffs_surface, zernike_coeffs_visibility, zernike_coeffs_brightness,
+        fitted_surface, final_rmse, low_order_surface_coeffs,
+    )
 
 
 def zern_from_nk(nk):
@@ -263,12 +359,17 @@ def zern_from_nk(nk):
     return RZern(order)
 
 
-def zernike_surface(zernike_coeffs, shape, diameter):
+def mat_xy(shape, diameter):
     max_x = shape[1] / diameter
     arr_x = np.linspace(-max_x, max_x, shape[1])
     max_y = shape[0] / diameter
     arr_y = np.linspace(-max_y, max_y, shape[0])
     mat_x, mat_y = np.meshgrid(arr_x, arr_y)
+    return mat_x, mat_y
+
+
+def zernike_surface(zernike_coeffs, shape, diameter):
+    mat_x, mat_y = mat_xy(shape, diameter)
 
     z_surface = zern_from_nk(len(zernike_coeffs))
     z_surface.make_cart_grid(mat_x, mat_y)
@@ -277,20 +378,24 @@ def zernike_surface(zernike_coeffs, shape, diameter):
     return fitted_surface
 
 
-def zernike_fit_lsq(order, surface, diameter):
-    max_x = surface.shape[1] / diameter
-    arr_x = np.linspace(-max_x, max_x, surface.shape[1])
-    max_y = surface.shape[0] / diameter
-    arr_y = np.linspace(-max_y, max_y, surface.shape[0])
-    mat_x, mat_y = np.meshgrid(arr_x, arr_y)
+def zernike_fit_lsq(order, surface, diameter, output_rmse=False):
+    mat_x, mat_y = mat_xy(surface.shape, diameter)
 
     z_surface = RZern(order)
     z_surface.make_cart_grid(mat_x, mat_y)
-    return z_surface.fit_cart_grid(surface)[0]
+    zernike_coeffs = z_surface.fit_cart_grid(surface)[0]
+    if output_rmse:
+        surface_fitted = z_surface.eval_grid(zernike_coeffs, matrix=True)
+        mask = np.logical_not(np.isnan(surface_fitted))
+        sum_se = np.sum((surface_fitted[mask] - surface[mask]) ** 2)
+        rmse = np.sqrt(sum_se / np.sum(mask))
+        return zernike_coeffs, rmse
+    return zernike_coeffs
 
 
 def fit_interferogram_with_zernikes(interferogram, max_order_phase: int=4, max_order_visibility: int=4,
-                                    max_order_brightness: int=4, diameter_px: float=None, plot=False, verbose=False):
+                                    max_order_brightness: int=4, diameter_px: float=None, plot=False, verbose=False,
+                                    get_full_model=False):
     """
     Fit the interferogram with Zernike polynomials up to a specified order.
 
@@ -313,9 +418,12 @@ def fit_interferogram_with_zernikes(interferogram, max_order_phase: int=4, max_o
         diameter_px = max(x_indices.max() - x_indices.min(), y_indices.max() - y_indices.min())
 
     # Fit Zernike polynomials
-    zernike_coeffs_surface, _, _, fitted_surface = zernike_fit_interferogram(
+    (
+        zernike_coeffs_surface, zernike_coeffs_visibility, zernike_coeffs_brightness,
+        fitted_surface, final_rmse, low_order_surface_coeffs,
+    ) = zernike_fit_interferogram(
         interferogram, max_order_phase, max_order_visibility, max_order_brightness, diameter=diameter_px,
-        plot=plot, verbose=verbose
+        plot=plot, verbose=verbose, progressive_order_increase=PROGRESSIVE_ORDER_INCREASE
     )
 
     # Reconstruct surface from Zernike coefficients
@@ -323,8 +431,14 @@ def fit_interferogram_with_zernikes(interferogram, max_order_phase: int=4, max_o
     fitted_surface = fitted_surface / (2 * np.pi)
     fitted_surface[np.isnan(fitted_surface)] = 0
     zernike_coeffs_surface = zernike_coeffs_surface / (2 * np.pi)
+    low_order_surface_coeffs = low_order_surface_coeffs / (2 * np.pi)
 
-    return zernike_coeffs_surface, fitted_surface
+    if get_full_model:
+        return (
+            zernike_coeffs_surface, fitted_surface, final_rmse, zernike_coeffs_visibility, zernike_coeffs_brightness,
+            low_order_surface_coeffs,
+        )
+    return zernike_coeffs_surface, fitted_surface, final_rmse
 
 
 def filter_as_zernike(surface, order, diameter_px):
@@ -371,10 +485,10 @@ def test_interferogram_fit():
 
     num_n_fringes = 10
     num_max_deviations = 20
-    num_orders = 10
+    num_orders = 3
     n_fringes = np.linspace(5, 30, num_n_fringes)
     max_deviations = np.linspace(10, 300, num_max_deviations)
-    orders = np.round(np.logspace(np.log10(5), np.log10(40), num_orders)).astype(int)
+    orders = np.round(np.logspace(np.log10(4), np.log10(9), num_orders)).astype(int)
 
     generator = FlatInterferogramGenerator(shape=IMAGE_SHAPE, wavelength_nm=WAVELENGTH, pixel_size=PITCH,
                                            min_fringe=N_FRINGES, max_fringe=N_FRINGES, diameter=DIAMETER,
@@ -391,9 +505,37 @@ def test_interferogram_fit():
         surface = remove_piston_and_tilt_with_zernikes(surface, generator.diameter_pixels)
         generator.surface = surface
         interferogram = generator.generate_flat_interferogram(normalized_carrier_frequency=frequency)
-        zernike_coeffs, fitted_surface = fit_interferogram_with_zernikes(
-            interferogram, order, ORDER_VISIBILITY, ORDER_BRIGHTNESS, diameter_px=generator.diameter_pixels
+
+        (
+            zernike_coeffs, fitted_surface, rmse_fit, zc_visibility, zc_brightness,
+            low_order_surface_coeffs) = fit_interferogram_with_zernikes(
+            interferogram, order, ORDER_VISIBILITY, ORDER_BRIGHTNESS, diameter_px=generator.diameter_pixels,
+            verbose=False, get_full_model=True
         )
+        zernike_coeffs_direct = zernike_fit_lsq(order, surface, generator.diameter_pixels)
+        # Set piston and tilt coefficients to the estimated low order ones
+        zernike_coeffs_direct[:3] = low_order_surface_coeffs
+        interferogram_direct = eval_interferogram_model_from_coeffs(zernike_coeffs_direct * 2*np.pi, zc_visibility,
+                                                                    zc_brightness, IMAGE_SHAPE,
+                                                                    generator.diameter_pixels)
+        mask = np.logical_not(np.isnan(interferogram_direct))
+        rmse_direct = np.sqrt(np.mean((interferogram_direct[mask] - interferogram[mask]) ** 2))
+
+        if PLOT_ALL_RESULTS_IN_TEST:
+
+            fig, axs = plt.subplots(1, 3, figsize=(15, 5))
+            axs[0].imshow(surface, cmap="gray")
+            axs[0].set_title("Original surface")
+            axs[1].imshow(fitted_surface, cmap="gray")
+            axs[1].set_title(f"Fitted surface with order {order}")
+            nk = len(zernike_coeffs)
+            axs[2].plot(np.arange(3, nk), zernike_coeffs_direct[3:],
+                        label=f"Direct fit of surface (RMSE interferogram: {rmse_direct:.2f})")
+            axs[2].plot(np.arange(3, nk), zernike_coeffs[3:],
+                        label=f"Fit from interferogram (RMSE interferogram: {rmse_fit:.2f})")
+            axs[2].set_title(f"Zernike coefficients for order {order}")
+            axs[2].legend()
+            plt.show()
         rmse = np.sqrt(np.mean((surface - fitted_surface) ** 2))
         rmses[i, j, k] = rmse
 
@@ -424,8 +566,10 @@ MAX_DEVIATION_NM = 100.0  # Maximum deviation in nm
 ORDER_PHASE = 6  # Maximum order of Zernike polynomials for phase
 ORDER_VISIBILITY = 0  # Maximum order of Zernike polynomials for visibility
 ORDER_BRIGHTNESS = 0  # Maximum order of Zernike polynomials for brightness
+REGULARIZATION_ALPHA = 2.0
 
 RANDOM_SEED = 0
+PLOT_ALL_RESULTS_IN_TEST = False
 
 if __name__ == "__main__":
     test_interferogram_fit()
