@@ -78,13 +78,15 @@ class FlatInterferogramGenerator():
         periods_px = self.diameter_pixels / n_fringes
         self.carrier_frequencies = 1 / periods_px
 
-    def random_rotation(self, interferogram):
+    def random_rotation(self, interferogram=None):
         if self.max_rotation == 0.0:
             self.current_rotation_angle = 0
             return interferogram
 
         self.current_rotation_angle = np.random.uniform(-self.max_rotation, self.max_rotation)
 
+        if interferogram is None:
+            return None
         return rotate(interferogram, self.current_rotation_angle, reshape=False, order=3, mode='nearest')
 
     @property
@@ -157,23 +159,29 @@ class FlatInterferogramGenerator():
     def rotate_simulated_minima_curves(self):
         self.minima_curves = rotate_2d_points(self.minima_curves, -self.current_rotation_angle, self.shape)
 
-    def generate_flat_interferogram(self, normalized_carrier_frequency=None):
+    def generate_flat_interferogram(self, normalized_carrier_frequency=None, allow_surface_rotation=True):
         if normalized_carrier_frequency is not None:
             self.current_frequency = normalized_carrier_frequency
         kx = self.current_frequency
         ky = 0.0
 
-        self.current_phase = 2 * np.pi * (kx * self.X + ky * self.Y + self.surface + np.random.rand())
+        if allow_surface_rotation:
+            self.current_phase = 2 * np.pi * (kx * self.X + ky * self.Y + self.surface + np.random.rand())
+        else:
+            self.random_rotation()
+            kx, ky = self.current_rotated_frequencies
+            self.current_phase = 2 * np.pi * (kx * self.X + ky * self.Y + self.surface)
         self.get_maximum_simulated_deviation_px(plot=False)
         interferogram = 1 + self.visibility_ratio * np.cos(self.current_phase)
         interferogram *= self.aperture_mask
-        interferogram = self.random_rotation(interferogram)
+        if allow_surface_rotation:
+            interferogram = self.random_rotation(interferogram)
+            self.rotate_simulated_minima_curves()
         interferogram += np.random.normal(0, 1, size=self.shape) * self.noise_level * self.visibility_ratio
         interferogram /= np.max(interferogram)
         interferogram_uint8 = np.clip(interferogram * 255, 0, 255).astype(np.uint8)
 
         self.current_interferogram = interferogram_uint8
-        self.rotate_simulated_minima_curves()
 
         return interferogram_uint8
 
